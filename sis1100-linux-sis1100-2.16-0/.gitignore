@@ -1,0 +1,11 @@
+.metadata/
+.settings/
+*.a
+*.o
+*.d
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+*.cmd

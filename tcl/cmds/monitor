@@ -1,0 +1,245 @@
+#!/usr/bin/wish
+#
+# monitor - A tool for providing instantaneous information from the HFBS PLC
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: monitor,v 1.2 2000/09/08 14:08:58 nickm Exp $
+
+
+package require dp
+if [catch {dp_MakeRPCClient localhost 51330} r] {
+    puts stderr "Can't connect to core program"
+    exit
+}
+
+# ------------------------ Global variables
+#
+set zsatz1 "-adobe-courier-medium-r-normal--20-140-100-100-m-110-iso8859-1"
+set zsatz2 "-adobe-courier-medium-r-normal--20-140-100-100-m-110-iso8859-1"
+set zsatz3 "-adobe-courier-medium-r-normal--20-140-100-100-m-110-iso8859-1"
+set zsatz4 "-adobe-courier-bold-r-normal--20-140-100-100-m-110-iso8859-1"
+set zsatz5 "-adobe-courier-bold-r-normal--20-140-100-100-m-110-iso8859-1"
+set zsatz6 "-adobe-courier-bold-r-normal--20-140-100-100-m-110-iso8859-1"
+set updateinterval 10
+
+#  ------------------------ Status Window -------------------------------------
+set f_status [frame .status  -borderwidth 2]
+set l_status [label $f_status.t -height 2 -width 33 \
+	-foreground white -background MidnightBlue -font fixed  \
+	-justify left -anchor nw]
+set l2_status [label $f_status.t2 -height 13 -width 33 \
+	-foreground yellow -background MidnightBlue -font fixed  \
+	-justify left -anchor nw]
+set l3_status [label $f_status.t3 -height 7 -width 33 \
+	-foreground orange -background MidnightBlue -font fixed \
+	-justify left -anchor nw]
+set b_exit [button $f_status.exit -foreground black \
+	-background IndianRed -text "Exit" -command exit]
+
+$f_status.t  configure -font $zsatz1
+$f_status.t2 configure -font $zsatz2
+$f_status.t3 configure -font $zsatz3
+
+
+# ------------- Error field
+
+set err(op) 0
+set err(ot) 0
+set err(vf) 0
+set err(df) 0
+set err(bd) 0
+
+
+# ---------------------------- New Procedures
+
+# Procedures 
+#
+proc Launch { args } {
+    global r
+    set cmd "dp_RPC $r "
+    foreach c $args {
+	append cmd "$c "
+    }
+    return [eval $cmd]
+}
+
+proc GetNStatus {} {
+    catch {Launch hdw read} result
+    PutStatus $result
+}
+
+proc ParseLogBlock { input record } {
+    upvar $record rec
+
+    #--------------------------------
+    
+    set outlist [split $input "\n"]
+    set line1 [lindex $outlist 0]
+    set line2 [lindex $outlist 1]
+    set line3 [lindex $outlist 2]
+    set line4 [lindex $outlist 3]
+
+    #--------------------------------
+
+    set timelist [eval list $line2]
+    if {![regexp {0} [lindex $timelist 0]]} { return -code error "Bad format"}
+    #set rec(ww)     [lindex $timelist  1]
+    set rec(ww) 0
+    #set rec(dd)     [lindex $timelist  2]
+    set rec(dd) 0
+    #set rec(hh)     [lindex $timelist  3]
+    set rec(hh) 0
+    #set rec(mm)     [lindex $timelist  4]
+    set rec(mm) 0
+    #set rec(ss)     [lindex $timelist  5]
+    set rec(ss) 0
+    set rec(abshrs) [lindex $timelist  1]
+    set rec(vac)    [lindex $timelist  2]
+    set rec(vac_en) [lindex $timelist  3]
+    set rec(dopmsp) [lindex $timelist  4]
+    set rec(dop_en) [lindex $timelist  5]
+    set rec(dop_op) [lindex $timelist  6]
+    set rec(dop_ot) [lindex $timelist  7]
+    set rec(dop_vf) [lindex $timelist  8]
+    set rec(pstmsp) [lindex $timelist  9]
+    set rec(pst_en) [lindex $timelist 10]
+    set rec(pst_df) [lindex $timelist 11]
+    set rec(pst_bd) [lindex $timelist 12]
+
+    set ioptlist [eval list $line4]
+    # Fill record structure with values we read
+    set rec(dopspd) [lindex $ioptlist  0]
+    set rec(p_in)   [lindex $ioptlist  1]
+    set rec(p_out)  [lindex $ioptlist  2]
+    set rec(t_in)   [lindex $ioptlist  3]
+    set rec(t_out)  [lindex $ioptlist  4]
+    set rec(t_bsh)  [lindex $ioptlist  5]
+    set rec(dflow)  [lindex $ioptlist  6]
+    set rec(pstspd) [lindex $ioptlist  7]
+    set rec(t_win)  [lindex $ioptlist  8]
+    set rec(pflow)  [lindex $ioptlist  9]
+    return 0
+}
+
+proc UpdateDisplay { record } {
+    upvar $record rec
+    
+    # Process displayed time
+    set outstring ""
+    #append outstring "         WW:DD:HH:MM:SS       \n"
+    #append outstring "         "
+    #append outstring [format "%2d" $rec(ww)]
+    #append outstring " "
+    #append outstring [format "%2d" $rec(dd)]
+    #append outstring " "
+    #append outstring [format "%2d" $rec(hh)]
+    #append outstring " "
+    #append outstring [format "%2d" $rec(mm)]
+    #append outstring " "
+    #append outstring [format "%2d" $rec(ss)]
+    #append outstring "\n"
+    append outstring  "           Current Time\n"
+    append outstring  "        "
+    append outstring  [clock format [expr int(3600 * $rec(abshrs))] \
+	    -format "%d%b%Y %H:%M:%S"]
+    append outstring  "         \n"
+
+    .status.t configure -text $outstring
+
+    # Process and display information for Doppler
+    set outstring ""
+    append outstring "Enabled........................$rec(dop_en)\n"
+    append outstring "Oil Pressure Switch............$rec(dop_op)\n"
+    append outstring "Oil Temperature Switch.........$rec(dop_ot)\n"
+    append outstring "Vibration Switch...............$rec(dop_vf)\n"
+    append outstring "Doppler Speed Nom (Hz)...."
+    append outstring [format "%6.1f\n" $rec(dopspd)]
+    append outstring "Doppler Speed Act (Hz)...."
+    append outstring [format "%6.1f\n" $rec(dopmsp)]
+    append outstring "Oil Pressure in (PSI)....."
+    append outstring [format "%6.1f\n" $rec(p_in)]
+    append outstring "Oil Pressure out (PSI)...."
+    append outstring [format "%6.1f\n" $rec(p_out)]
+    append outstring "Oil Temperature in (F)...."
+    append outstring [format "%6.1f\n" $rec(t_in)]
+    append outstring "Oil Temperature out (F)..."
+    append outstring [format "%6.1f\n" $rec(t_out)]
+    append outstring "Shaft Temperature (F)....."
+    append outstring [format "%6.1f\n" $rec(t_bsh)]
+    append outstring "Watercooling flow (l/s)..."
+    append outstring [format "%6.1f\n" $rec(dflow)]
+    append outstring "Chamber Vacuum (torr)....."
+    append outstring [format "%6.1f\n" $rec(vac)]
+
+    .status.t2 configure -text $outstring
+    
+    # Process information for PST
+    set outstring ""
+    append outstring "Enabled........................$rec(pst_en)\n"
+    append outstring "Drive Fault....................$rec(pst_df)\n"
+    append outstring "Bearing Damage.................$rec(pst_bd)\n"
+    append outstring "PST Speed Nom (rpm)......."
+    append outstring [format "%6.1f\n" $rec(pstspd)]
+    append outstring "PST Speed Act (rpm)......."
+    append outstring [format "%6.1f\n" $rec(pstmsp)]
+    append outstring "Coil Temperature (F)......"
+    append outstring [format "%6.1f\n" $rec(t_win)]
+    append outstring "Watercooling flow (l/s)..."
+    append outstring [format "%6.1f\n" $rec(pflow)]
+
+    .status.t3 configure -text $outstring
+    return 0
+    
+}
+
+proc PutStatus { input } {
+    global l_status
+    $l_status configure -text $input
+}
+
+proc LearnStatus { interval } {
+    if [catch {Launch hdw read} input] {
+	# If we get an error, just keep on rolling until it starts working 
+	# again
+	after [expr 1000 * $interval] "LearnStatus $interval"
+    }
+    ParseLogBlock $input rec
+    UpdateDisplay rec
+    after [expr 1000 * $interval] "LearnStatus $interval"
+}
+
+# ------------------------------ Build Status Window  ------------------------
+wm title . "HFBS Status"
+
+frame .error_f
+label .error_f.l  -background red -foreground black 
+button .error_f.b -background red -foreground green -text "!!! GET HELP IMMEDIATELY !!!" 
+
+set t_run [label $f_status.trun -relief raised -background MidnightBlue \
+	-foreground white -text "          Runtime       "]
+$t_run configure -font $zsatz4
+
+set t_doppler [label $f_status.tdop -relief raised -background MidnightBlue \
+	-foreground yellow -text "      DopplerDrive     "]
+$t_doppler configure -font $zsatz5
+
+set t1_blank [label $f_status.t1b -background grey -relief raised]
+set t2_blank [label $f_status.t2b -background grey -relief raised]
+set t3_blank [label $f_status.t3b -background grey -relief raised]
+set t_pst [label $f_status.tpst -relief raised -background MidnightBlue \
+	-foreground orange -text "         PST          "]
+$t_pst configure -font $zsatz6
+
+pack $f_status
+pack $t_run -fill x
+pack $l_status -side top
+pack $t_doppler -fill x
+pack $l2_status -side top
+pack $t_pst -fill x
+pack $l3_status -side top
+pack $b_exit -expand true -fill x -side top
+
+# Start the ball rolling...
+
+LearnStatus $updateinterval

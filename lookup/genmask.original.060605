@@ -1,0 +1,64 @@
+#!/usr/bin/perl
+
+$opt_b = 0;
+$mon_init    = 0; 
+#@mon_tr      = ( 214, 948,1579,2313,2944,3678);
+$det_hi_init = 1;
+#@det_hi_tr   = ( 500,1300,1870,2680,3240,4030);
+$det_lo_init = 1;
+#@det_lo_tr   = ( 480,1350,1840,2700,3200,4060);
+#@mon_tr      = ( 500,1060,1870,2420,3240,3760);
+#@det_hi_tr   = ( 500,1300,1870,2680,3240,4030);
+# Reset monitor mask 6/5/2006
+@mon_tr      = ( 400,1200,1800,2600,3200,4000);
+@det_hi_tr   = ( 585,1280,1955,2650,3320,4010);
+@det_lo_tr   = @det_hi_tr;
+
+sub FlipFlop {
+    local($flag) = @_;
+
+    if ($flag) { 
+	return 0; 
+    } else {
+	return 1;
+    }
+}
+
+$det_hi_idx = 0;
+$det_lo_idx = 0;
+$mon_idx    = 0;
+$det_hi_val = $det_hi_init;
+$det_lo_val = $det_lo_init;
+$mon_val    = $mon_init;
+
+for($i=0;$i<4096;$i++) {
+    $mask = 8;
+    if ($i == $mon_tr[$mon_idx]) {
+	#print stderr "Flipped lo"
+	$mon_val = &FlipFlop($mon_val);
+	$mon_idx++;
+    }
+    if ($i == $det_lo_tr[$det_lo_idx]) {
+	#print stderr "Flipped lo"
+	$det_lo_val = &FlipFlop($det_lo_val);
+	$det_lo_idx++;
+    }
+    if ($i == $det_hi_tr[$det_hi_idx]) {
+	#print stderr "Flipped hi"
+	$det_hi_val = &FlipFlop($det_hi_val);
+	$det_hi_idx++;
+    }
+
+    #Short-circuit to leave monitor unmasked
+    $mask = 0;
+    if ($mon_val)    { $mask += 1; }
+    if ($det_lo_val) { $mask += 2; }
+    if ($det_hi_val) { $mask += 4; }
+    if ($opt_b) {
+	# print output in binary (for fast reads)
+	$binval = pack "N",$mask;
+	print $binval;
+    } else {
+	printf " %x \n", $mask;
+    }
+}

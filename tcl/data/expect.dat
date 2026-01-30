@@ -1,0 +1,26 @@
+User name?: super
+Password: 
+Process #12 logged on    98/05/01 20:13:02
+Welcome!
+
+
+
+
+*          ******  WELCOME TO PROFESSIONAL OS-9/68040 V2.4  ******          *
+OS-9>> 
+OS-9>> procs
+ Id PId Grp.Usr  Prior  MemSiz Sig S    CPU Time   Age Module & I/O
+  2   0   0.0     128    0.50k   0 w        0.01 166:02 sysgo <h0 >>>term
+  3   2   0.0     128   15.50k   0 s        0.12 166:02 tsmon <h0 >>>term
+  4  10   0.0     128    6.75k   0 w        0.13 27:10 shell <>>>pks00
+  5   0   0.0     128    7.00k   0 s        0.03 166:02 ispstart <socket >>term
+  6   0   0.0     128   12.00k   0 e        0.18 166:02 telnetd <>>>nil
+  7   0   0.0     128    2.00k   0 s       54.63 166:02 ifman
+  8   0   0.0     128    2.00k   0 a        0.65 166:02 sockman
+  9   0   0.0     128   12.00k   0 e        0.00 166:02 ftpd <>>>nil
+ 10   0   0.0     128   22.00k   0 e       22.93 27:10 telnetdc <pks00
+ 11   4   0.0     128 2575.75k   0 a  3:14:07.68  4:26 hfbsdaq <>>>pks00
+ 12  13   0.0     128    6.75k   0 w        0.01  0:01 shell <>>>pks01
+ 13   0   0.0     128   22.00k   0 a        0.01  0:01 telnetdc <pks01
+ 14  12   0.0     128   18.25k   0 *        0.07  0:00 procs <>>>pks01
+OS-9>> 

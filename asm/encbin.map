@@ -1,0 +1,75 @@
+Analog Devices ADSP-210x0 Linker             encbin.map               Page 1
+Release 3.3, Version 2.21                    Wed Feb 25 08:19:44 2004
+Copyright (c) 1991-1996 Analog Devices, Inc.
+ 
+ 
+Architecture Description: ADSP21061_PROM_Boot_Loader_Architecture
+ 
+Segment     Start     End       Length      Memory Type          Attribute    Width
+ 
+seg_irqv    020000    0200ff    256         Program Memory       RAM
+seg_pm1     020100    021fff    7936        Program Memory       RAM
+seg_dm1     00023000  00023fff  4096        Data Memory          RAM
+seg_pm2     024000    025fff    8192        Program Memory       RAM
+seg_dm2     00027000  00027fff  4096        Data Memory          RAM
+ 
+ 
+Memory Usage (Actual):
+ 
+Segment     Start     End       Length      Memory Type          Attribute
+ 
+seg_irqv    ******    ******    0           Program Memory       RAM
+seg_pm1     020100    020205    262         Program Memory       RAM
+seg_pm2     024000    024003    4           Program Memory       RAM
+seg_dm1     00023000  00023002  3           Data Memory          RAM
+seg_dm2     ********  ********  0           Data Memory          RAM
+ 
+ 
+Memory Usage Summaries:
+ 
+Memory Type     Attribute  Total
+ 
+Program Memory  ROM        0
+Program Memory  RAM        266
+Program Memory  PORT       0
+Data Memory     ROM        0
+Data Memory     RAM        3
+Data Memory     PORT       0
+ 
+ 
+Cross Reference for file -> encbin.obj:
+ 
+Symbol                             Type  Address   Class
+ 
+D5H                                DM    00023001  static
+ENCCEILING                         PM      0201d8  static
+ENCFINISH                          PM      0201dc  static
+ENCINC                             PM      0201d0  static
+ENCZERO                            PM      0201cf  static
+HIGHIST                            PM      0201c7  static
+INT0ST                             DM    00023000  static
+IRQSETUP                           PM      020103  static
+Irq_Service_IRQ1                   PM      020200  static
+LOOP_START                         PM      020118  static
+LOWHIST                            PM      0201ad  static
+MCMDLATCH                          PM      020181  static
+Mirrow_IRQ1_Vector                 PM      020101  static
+NOERRORLABEL                       PM      0201fa  static
+NOHIGHIST                          PM      0201c3  static
+NOLOWHIST                          PM      0201a9  static
+NOMONHIST                          PM      020196  static
+NOUPDATE                           PM      020181  static
+PRELOOP                            PM      02015e  static
+SAVER6                             DM    00023002  static
+Start                              PM      020100  static
+WORKLOOP                           PM      02016d  static
+WORKLOOP1                          PM      020156  static
+Analog Devices ADSP-210x0 Linker             encbin.map               Page 2
+Release 3.3, Version 2.21                    Wed Feb 25 08:19:44 2004
+Copyright (c) 1991-1996 Analog Devices, Inc.
+ 
+ 
+WORKLOOP2                          PM      02015a  static
+Wait_On_VME_Busy                   PM      024000  static
+ 
+ 

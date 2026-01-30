@@ -1,0 +1,71 @@
+debug [-m?] <command to fork>
+    @n          - set default relocation register to .rn
+    b           - list breakpoints
+    b <addr>    - set breakpoint @<addr>
+    c <addr>    - switch to change mode @<addr>, byte lengths
+        +       - move to next location
+        -       - move to previous location
+        <CR>    - move to next location & display
+        <num>   - store new value & move to next
+        .       - exit change mode
+   cw <addr>   - change mode, word lengths
+   cl <addr>   - change mode, long word lengths
+    d[X][n] <addr> [<count>] [>path] - switch to display mode; display memory
+        <addr> for <count> bytes in hex and ASCII; default <count> is 256.
+        <CR>    - display next <count> bytes
+        [X]     - floating format: 'f'=single, 'd'=double, 'x'=extended
+        [n]     - digit 0-9 says how many lines to show if count is missing
+        any other command exits display mode
+        For df and dd, <addr> can be &.reg to indicate value is in a d0-a7 reg
+            dx allows &.fpN where N is a floating point register
+    di <addr> [<count>] [>path] - as above except display instructions
+        default <count> is 20.
+    f <command> - fork debug process.
+    g           - go @<PC>
+    g <addr>    - go @<addr>
+    gs          - execute next instruction and stop
+    gs <addr>   - execute until PC == <addr>
+    i           - print instructions-executed counter (in decimal)
+    k <addr>    - kill breakpoint @<addr>
+    k*          - kill all breakpoints
+    l <module>  - links to the named module.  Address is placed in .r7
+    mf[s][n] <beg> <end> <value> - Memory fill
+        <beg> - beginning address, <end> - ending address, <value> is fill
+        value, [s] is b, w, l (b=default), [n] means non-aligned
+    ms[s][n] <beg> <end> [:<mask>] <value> - Memory search
+        same args as fill, :<mask> is bitmask applied to search value
+        <value> can be "<string> to search for string
+    o<various>  - special option control, o? for help
+    q           - quit debugger
+    s <symbol>  - Print value of and module containing <symbol>
+                    (wildcards * and ? allowed)
+    sm          - Show symbol module directory
+    ss <addr>   - Set default symbol module to module containing <addr>
+    ss <name>:  - Set default symbol module to module <name>
+    sd <module> - Show data symbols for symbol module
+    sc <module> - Show code symbols for symbol module
+    t [<num>]   - trace one or <num> instructions & switch to
+                  trace mode
+        <CR>    - trace another instruction
+        any other command exits trace mode
+    v <expr>    - prints the value of expression in hex and decimal
+    w [<n>]     - linkstack traceback via (a5).  <n>=depth.
+    x [<count>] - Execute <count> instructions.  Default is infinite.
+    .           - print registers
+    .r          - print relocation registers
+    .<reg> <num> - set register <reg> to <num>
+
+    <addr> can be a symbol or number or an expression
+    <num>  is a hex value; decimal values start with a #
+           ascii values start with a ', ie: 'A
+    <count> can be * (for infinity)
+
+    Expression operators are:
+        + - * / > < & | ^ ~     (all same precedence; left to right eval)
+        plus,minus,times,divide,shift right,shift left,and,or,xor,neg
+        () - override left to right eval
+        [<expr>]s - indirection operator; <expr> is address;
+                    "s" is operand size b, w, or long (missing means long)
+
+    ?   - Prints what you see here
+    ^E or ^C aborts command and causes a prompt

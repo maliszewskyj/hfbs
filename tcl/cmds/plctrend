@@ -1,0 +1,258 @@
+#!/usr/bin/wish
+#
+# plctrend - Read monitor log files and display trends in hardware readings
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: plctrend,v 1.2 1999/10/25 21:01:08 nickm Exp $
+
+
+if [catch {package require BLT} result] {
+    puts stderr $result
+    exit
+}
+# temporary fixes because BLT is fucked up...again!
+#
+source /usr/lib/blt2.4/bltGraph.tcl
+#
+# Set up global variables
+#
+set allvecs {hours vac dopspd p_in p_out t_in t_out t_bsh dflow dopset pstspd \
+	t_win pflow pstset }
+
+foreach v $allvecs {
+    blt::vector $v
+    set plshow($v) 0
+}
+
+set plvecs {vac dopspd p_in p_out t_in t_out t_bsh dflow dopset pstspd \
+	t_win pflow pstset }
+
+array set pllabel {vac "Vacuum" \
+	dopspd "Doppler Nom. Speed" \
+	p_in   "Doppler Inlet Pressure" \
+	p_out  "Doppler Outlet Pressure" \
+	t_in   "Doppler Inlet Temp" \
+	t_out  "Doppler Outlet Temp"\
+	t_bsh  "Doppler Bushing Temp"\
+	dflow  "Doppler Water Flow" \
+	dopset "Doppler Speed Setpoint" \
+	pstspd "PST Nom. Speed" \
+	t_win  "PST Winding Temp" \
+	pflow  "PST Water Flow" \
+	pstset "PST Speed Setpoint" }
+
+array set plcolor {  
+    vac     black
+    dopspd  red
+    p_in    DarkGreen
+    p_out   SeaGreen
+    t_in    DeepPink
+    t_out   VioletRed
+    t_bsh   orchid
+    dflow   sienna
+    dopset  orange
+    pstspd  blue
+    t_win   DeepSkyBlue
+    pflow   turquoise
+    pstset  cyan
+}
+
+set monfile "No data"
+set printcmd "/usr/bin/lpr"
+set lprcmd   $printcmd
+
+proc OpenData {{infile {}}} {
+    global monfile
+    set types {
+	{{Monitor Files}    {.mon}     MON} 
+	{{All Files}        *             }
+    }
+
+    if {[string length $infile] == 0} {
+	set filename [tk_getOpenFile -initialdir /home/hfbs/cormon \
+		-filetypes $types]
+    } else {
+	set filename $infile
+    }
+    if {[string length $filename] == 0} { return } 
+
+    BusyCursorOn
+    update
+    CleanVecs
+
+    if [catch {ParseLogFile $filename} npts] {
+	PutText $npts
+	BusyCursorOff
+	update
+	return
+    }
+    set monfile $filename
+    .g configure -title $filename
+    BusyCursorOff
+    ShowData
+    update
+}
+
+proc ParseLogBlock { file record } {
+    upvar $record rec
+    
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    set timelist [eval list $line]
+    if {![regexp {0} [lindex $timelist 0]]} { return -code error "Bad format"}
+    set ww [lindex $timelist 1]
+    set dd [lindex $timelist 2]
+    set hh [lindex $timelist 3]
+    set mm [lindex $timelist 4]
+    set ss [lindex $timelist 5]
+    set rec(minutes) [expr ((($ww * 7.0) + $dd) * 24.0 + $hh) * 60.0 + $mm]
+    set rec(hours)   [expr $rec(minutes) / 60.0] 
+    set rec(vac)     [lindex $timelist 6]
+    set rec(dopset)  [lindex $timelist 8]
+    set rec(pstset)  [lindex $timelist 13]
+    # Build time information
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    set ioptlist [eval list $line]
+    # Fill record structure with values we read
+    set rec(dopspd) [lindex $ioptlist  0]
+    set rec(p_in)   [lindex $ioptlist  1]
+    set rec(p_out)  [lindex $ioptlist  2]
+    set rec(t_in)   [lindex $ioptlist  3]
+    set rec(t_out)  [lindex $ioptlist  4]
+    set rec(t_bsh)  [lindex $ioptlist  5]
+    set rec(dflow)  [lindex $ioptlist  6]
+    set rec(pstspd) [lindex $ioptlist  7]
+    set rec(t_win)  [lindex $ioptlist  8]
+    set rec(pflow)  [lindex $ioptlist  9]
+    return 0
+}
+
+proc ParseLogFile { filename } {
+    global allvecs 
+    foreach v $allvecs { global $v }
+    if [catch {open $filename r} file] {
+	return -code error "Unable to open file: $filename"
+    }
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    if [catch {gets $file} line] { return -code error "Premature EOF" }
+    set numrecs 0
+    while {![eof $file]} {
+	if [catch {ParseLogBlock $file record}] {
+	    close $file
+	    return $numrecs
+	} else {
+	    foreach v $allvecs {
+		$v append $record($v)
+	    }
+	    incr numrecs
+	}
+    }
+    close $file
+    return $numrecs
+}
+
+proc ShowData {} {
+    global plshow plvecs
+    foreach v $plvecs {
+	global  $v
+	.g element configure e$v -xdata hours -ydata $v \
+		-hide [expr !$plshow($v)]
+    }
+}
+
+proc CleanVecs { } {
+    global allvecs
+
+    foreach v $allvecs {
+	uplevel #0 blt::vector destroy $v
+	uplevel #0 blt::vector create $v
+    }
+}
+
+proc PutText { input } {
+    .t configure -text $input
+}
+
+proc BusyCursorOn {} {
+    . configure -cursor watch
+    .g configure -cursor watch
+}
+
+proc BusyCursorOff {} {
+    . configure -cursor {}
+    .g configure -cursor crosshair
+}
+
+proc PrintCmdAccept { } {
+    global printcmd lprcmd
+    set lprcmd $printcmd
+}
+
+proc PrintCmdSetup { } {
+    global printcmd lprcmd
+
+    toplevel .print
+    label .print.l -text "Enter Print Command: "
+    entry .print.e -textvariable printcmd
+    button .print.dismiss -text "Dismiss" -command "destroy .print"
+    button .print.accept  -text "Accept"  -command "PrintCmdAccept"
+    grid .print.l       .print.e      -in .print
+    grid .print.dismiss .print.accept -in .print
+}
+
+proc PrintGraph { } {
+    global lprcmd buffer
+    set outfile "/tmp/hfbs[pid].ps"
+    if [catch {.g postscript output $outfile}] {
+	PutText "Cannot create postscript output"
+	return
+    }
+
+    if [catch {eval exec $lprcmd $outfile} result] {
+	PutText $result
+    }
+    catch {exec rm -f $outfile} result
+}
+
+# Build GUI >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#
+set m [frame .mbar -relief raised -borderwidth 2]
+set g [blt::graph .g]
+set f [frame .f]
+set t [label .t -height 2 -font fixed -relief sunken -justify left -anchor nw]
+#
+# Build data elements
+# 
+.g xaxis configure -title "Hours"
+.g configure -title "PLC trends"
+.g legend configure -hide 1
+foreach v $plvecs {
+    .g element create e$v -xdata hours -ydata $v -hide 1 -symbol none \
+	    -color $plcolor($v)
+    checkbutton $f.$v -text $pllabel($v) -variable plshow($v) \
+	    -foreground $plcolor($v) -command ShowData 
+    grid $f.$v -in $f -sticky w
+    
+}
+
+set mf [menubutton $m.file -width 5 -text File -underline 0 \
+	-menu $m.file.menu]
+
+set mfm [menu $mf.menu]
+$mfm add command -label Open -underline 0 -command OpenData
+#$mfm add command -label "Save Current" -command SaveData
+$mfm add command -label "Print Setup"  -underline 1 -command PrintCmdSetup
+$mfm add command -label "Print"        -underline 0 -command PrintGraph
+$mfm add command -label Exit -command exit
+
+wm title . "PLC trends"
+pack $m -side top -fill x -anchor n
+pack $t -side top -expand true -fill x
+pack $f -side right 
+pack $g -side top -expand true -fill both 
+pack $mf -side left -in .mbar 
+
+Blt_ZoomStack .g

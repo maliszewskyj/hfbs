@@ -1,0 +1,2571 @@
+#!/usr/bin/wish
+#
+# hfbs - User interface for HFBS data acquisition system
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: hfbs,v 1.19 2006/11/28 22:16:16 gaspar Exp $
+###############################################################################
+# 
+# Global variables
+#
+#    view        - visualization variables
+#    control     - control preferences
+#    chans       - number of chans / mode
+#    dets        - number of dets  / mode
+#    hfbsbuf     - run buffer variables
+#    hfbsbufdisp - run buffer variables (for display)
+#    scanbuf     - scan buffer variables
+#    scanbufdisp - scan buffer variables (for display)
+#
+# NArrays
+#
+#    total             hvec
+#    data              pv
+#    normalize         ordinal
+#    work2             energy
+#
+# Vectors
+#
+#    x                 y
+#    xs                xdet
+#    x_e               ydet
+#
+#<<<<<<<<<<<<<<<<<<<<<<<
+set debug 0
+#<<<<<<<<<<<<<<<<<<<<<<< Set up splash screen
+#wm withdraw .
+#toplevel .placard -borderwidth 4 -bg orange -relief raised
+#wm overrideredirect .placard 1
+
+#after idle {
+#    update idletasks
+#    set xmax [winfo screenwidth .placard]
+#    set ymax [winfo screenheight .placard]
+#    set x0 [expr ($xmax - [winfo reqwidth .placard])/2]
+#    set y0 [expr ($ymax - [winfo reqheight .placard])/2]
+#    wm geometry .placard "+$x0+$y0"
+#}
+
+#label .placard.info -bg orange \
+#	-text "National Institute of Standards and Technology"
+#pack .placard.info -side bottom -fill x
+#set imh [image create photo -file /usr/local/hfbs/lib/images/ncnrtrans.gif]
+#label .placard.icon -image $imh -bg orange
+#pack .placard.icon -side top 
+#update
+#<<<<<<<<<<<<<<<<<<<<<<< End of splash screen setup
+
+
+
+# load packages and shared libraries
+package require BLT
+source /usr/local/hfbs/tcl/rpc.tcl
+package require narray
+foreach lib { /usr/local/hfbs/daq/libsharehist.so } {
+    if [catch {load $lib} result] {
+	puts stderr "Can't load shared library: $lib"
+#	exit
+    }
+}
+
+# Connect to core program as a client
+if {!$debug} {
+    if [catch {RPCClient localhost 51330} r] { 
+	puts $r
+	exit 
+    }
+} else { 
+    set r 0 
+    set vmemode 0
+}
+
+#narray create total        20 4096
+#narray create data         1 1
+#narray create pv           1 1
+#narray create normalize    1 1
+#narray create xvec         1 1
+#narray create work2        1 1
+#narray create hvec      4096
+#narray create ordinal   4096
+
+#total map {[] = 0;}
+#ordinal map {[] = @0;}
+
+array set chans { pst 4096 time 4096 velocity 4096 }
+array set dets  { pst 20   time   20 velocity   20 }
+set colors { black grey20 grey40 grey60 grey80 \
+	IndianRed OrangeRed PaleVioletRed VioletRed \
+	SeaGreen PaleGreen SpringGreen DarkOliveGreen \
+	MidnightBlue SlateBlue SteelBlue CadetBlue }
+set livetime 0.0
+
+blt::vector y(4096)
+blt::vector xs(4096)
+blt::vector x_e(2048)
+blt::vector ydet(17)
+blt::vector xdet(17)
+for {set i 1} {$i < 17} {incr i} { blt::vector y${i}(4096) }
+for {set i 0} {$i < 17} {incr i} {    set xdet($i) $i }
+
+set ordinal {}
+for {set i 0} {$i < 4096} {incr i} {
+    lappend ordinal $i
+}
+xs set $ordinal
+
+
+# Global variables for control
+set control(knownmodes) {pst time velocity scan}
+set control(autoupdate) 1
+set control(pstspeed)   4728; # Choose reasonable default
+set control(dopspeed)   0
+set control(dopspdset)  0
+set control(pstspdset)  4728; # Choose reasonable default
+set control(doposcamp)  0
+set control(doposcper)  60
+set control(doposc)     0
+set control(tempset)    300.0
+set control(tempramp)   0.0
+set control(tempchoose) lk340
+set control(sampsensor) A
+set control(ctrlsensor) B
+set control(veclen)     4096
+set control(filename)   "hfbs.dat"
+set control(printcmd)   "/usr/bin/lpr"
+set control(lprcmd)     $control(printcmd)
+set control(mode)      [lindex $control(knownmodes) $vmemode]
+
+#
+# visualization preferences
+set view(detlabel)       "Det:  0"
+set view(integrate)      0 
+set view(norm_smpl)      0
+set view(norm_mon)       0
+set view(currentdet)     sum
+set view(integrate_done) 0
+set view(norm_smpl_done) 0
+set view(norm_mon_done)  0
+set view(xauto)          1
+set view(xmin)           0
+set view(xmax)           1
+set view(yauto)          1
+set view(ymin)           0
+set view(ymax)           1
+# Set up detector channel integration mask
+for {set i 0} {$i < 17} {incr i} {set view($i) 0}
+for {set i 5} {$i < 16} {incr i} {set view($i) 1}
+
+set remoterun(starttime) 0
+set remoterun(dopfreq)  0
+
+###############################################################################
+# Global variables for run buffers
+#
+#set tcl_precision 4
+set hfbsbuf(nbuf) 12
+set hfbsbuf(flds) { comments user ncycles cyctime t0 dt mode \
+	readtemp checktemp checkdop}
+for {set i 0} {$i < $hfbsbuf(nbuf)} {incr i} {
+    set hfbsbuf($i,comments)  empty
+    set hfbsbuf($i,user)     ""
+    set hfbsbuf($i,ncycles)      1
+    set hfbsbuf($i,cyctime) 600
+    set hfbsbuf($i,t0)      300.0
+    set hfbsbuf($i,readtemp)  0
+    set hfbsbuf($i,checktemp) 0
+    set hfbsbuf($i,checkdop)  0
+    set hfbsbuf($i,dt)        0.0
+    set hfbsbuf($i,mode)      pst
+}
+
+foreach f $hfbsbuf(flds) { set hfbsbufdisp($f) $hfbsbuf(0,$f) }
+set hfbsbufdisp(label)   "IBuffer No:  0"
+set hfbsbufdisp(current)               0
+set hfbsbufdisp(lbox)    .l.list
+
+###############################################################################
+# Global variables for scan buffers
+set scanbuf(nbuf) 12
+set scanbuf(flds) { comments user ncycles cyctime holdtime tempstart tempinc \
+	varytemp readtemp}
+for {set i 0} {$i < $scanbuf(nbuf)} {incr i} {
+    set scanbuf($i,comments) empty
+    set scanbuf($i,user)     ""
+    set scanbuf($i,ncycles)  1
+    set scanbuf($i,cyctime)  600
+    set scanbuf($i,holdtime) 0
+    set scanbuf($i,tempstart) 300.0
+    set scanbuf($i,tempinc)   1.0
+    set scanbuf($i,varytemp)  0
+    set scanbuf($i,readtemp)  0
+}
+foreach f $scanbuf(flds) { set scanbufdisp($f) $scanbuf(0,$f) }
+set scanbufdisp(label)   "SBuffer No:  0"
+set scanbufdisp(current)               0
+set scanbufdisp(lbox)    .s.list
+set scanbufdisp(mode)    time
+
+# gaspar begin
+set scanbufop(command) "copy 1 11"
+set scanbufop(message) "Type a buffer command below."
+set hfbsbufop(command) "copy 1 11"
+set hfbsbufop(message) "Type a buffer command below."
+# gaspar end
+
+set runinfo(rundir)         /usr/local/hfbs/data
+set runinfo(runfile)        19981101_01.hfbs
+set runinfo(mode)           pst
+set runinfo(user)           ""
+set runinfo(starttime)      [clock format [clock seconds] -format "%d-%b-%Y %H:%M:%S"]
+set runinfo(ncycles)        999
+set runinfo(cyctime)        600
+set runinfo(curcycle)       0
+set runinfo(cycstart)       $runinfo(starttime)
+set runinfo(tottime)        "000000"
+set runinfo(comments)       "empty"
+set runinfo(doppler)        " 10.0"
+set runinfo(sampletemp)     "300.0"
+set runinfo(statwid)        .f.curstat
+set runinfo(status)         "Stopped"
+set runinfo(inprogress)     0
+set runinfo(varytemp)       0
+
+set scan(npts)     1
+set scan(pttime)   60
+set scan(scmode)   time
+set scan(tstart)   300.0
+set scan(deltat)   0.0
+set scan(holdsec)  60
+set scan(comment)  "Scan test"
+set scan(toplevel) ""
+
+###############################################################################
+# GUI helper functions
+#
+#puts "Defining procedures"
+proc About { } {
+  tk_dialog .about {About...} \
+    "hfbs control program\nN.C. Maliszewskyj\n<nickm@nist.gov>" \
+    info 0 OK
+}
+
+proc ScrolledListbox { parent args } {
+    # Create listbox attached to scrollbars, pass through $args
+    frame $parent
+    eval {listbox $parent.list \
+	    -yscrollcommand [list $parent.sy set] } $args
+    # Create scrollbar attached to the listbox
+    scrollbar $parent.sy -orient vertical \
+	    -command [list $parent.list yview]
+    pack $parent.sy -side right -fill y
+    # pack to allow for resizing
+    pack $parent.list -side left -fill both -expand true
+    return $parent.list
+}
+
+proc ScrolledLabelledListbox { parent {title ""} args } {
+    global tcl_platform
+    set fontname fixed
+    if [regexp {windows} $tcl_platform(platform)] {
+	set fontname ansifixed
+    }
+
+    # Create listbox attached to scrollbars, pass through $args
+    frame $parent
+    eval {listbox $parent.list -font $fontname -takefocus 0 \
+	    -yscrollcommand [list $parent.sy set] } $args
+    # Create scrollbar attached to the listbox
+    scrollbar $parent.sy -orient vertical \
+	    -command [list $parent.list yview]
+    label $parent.title -text $title -borderwidth 4 -anchor w -font $fontname
+    
+    pack $parent.title -expand true -fill x
+    pack $parent.sy -side right -fill y
+    pack $parent.list -side left -fill both -expand true
+    # pack to allow for resizing
+    return $parent.list
+}
+
+#
+# Procedures for creating and manipulating notebook panes
+#
+option add *Notebook.borderWidth 2 widgetDefault
+option add *Notebook.relief sunken widgetDefault
+
+proc notebook_create { win } {
+    global nbInfo
+
+    frame $win -class Notebook
+
+    pack propagate $win 0
+
+    set nbInfo($win-count)   0
+    set nbInfo($win-pages)   ""
+    set nbInfo($win-current) ""
+
+    # Remember to bind to destroy method
+    bind $win <Destroy> "notebook_destroy $win"
+
+    return $win
+}
+
+proc notebook_destroy { win } {
+    global nbInfo
+
+    foreach p [array names nbInfo] {
+	if [regexp "^$win" $p] {
+	    unset nbInfo($p)
+	}
+    }
+}
+
+proc notebook_page { win name } {
+    global nbInfo
+
+    set page "$win.page[incr nbInfo($win-count)]"
+    lappend nbInfo($win-pages)  $page
+    set nbInfo($win-page-$name) $page
+
+    frame $page
+
+    if {$nbInfo($win-count) == 1} {
+	after idle [list notebook_display $win $name]
+    }
+    
+    return $page
+}
+
+proc notebook_display {win name} {
+    global nbInfo
+
+    set page ""
+    if {[info exists nbInfo($win-page-$name)]} {
+	set page $nbInfo($win-page-$name)
+    } elseif {[winfo exists $win.page$name]} {
+	set page $win.page$name
+    }
+    if {"" == $page} {
+	error "bad notebook page \"$name\""
+    }
+    
+    # perform size calculation
+    notebook_fix_size $win
+    if {"" != $nbInfo($win-current)} {
+	pack forget $nbInfo($win-current)
+    }
+    pack $page -expand yes -fill both
+    set nbInfo($win-current) $page
+    return $page
+}
+
+proc notebook_fix_size { win } {
+    global nbInfo
+
+    update idletasks
+
+    set maxw 0
+    set maxh 0
+    foreach page $nbInfo($win-pages) {
+	set w [winfo reqwidth $page]
+	if {$w > $maxw} {set maxw $w}
+
+	set h [winfo reqheight $page] 
+	if {$h > $maxh} {set maxh $h} 
+    }
+
+    set bd [$win cget -borderwidth]
+    set maxw [expr $maxw + 2 * $bd]
+    set maxh [expr $maxh + 2 * $bd]
+    $win configure -width $maxw -height $maxh
+}
+
+###############################################################################
+# Procedures 
+#
+proc Launch { args } {
+    global r debug
+    set cmd [join $args " "]
+    if {$debug} {
+	puts $cmd
+    } else {
+	return [RPCDo $cmd]
+    }
+}
+
+proc AutoUpdateChange { args } {
+    global control
+    if {$control(autoupdate)} {
+	set cmd Subscribe
+    } else {
+	set cmd UnSubscribe
+    }
+    catch {Launch $cmd} result
+    PutText $result
+}
+
+# Instigate a "refresh" of the data remotely
+# The core program sends this command to force the user interface to
+#   refresh its display from the shared memory image
+proc RemoteUpdate { } {
+    # To prevent a deadlock, return immediately but perform the 
+    # action in 15 sec
+
+    PutText "Refresh request received"
+    after 5000 Refresh
+    return "OK:\nRefresh request received"
+}
+
+# Refresh data viewed via shared memory
+# 
+proc Refresh { } {
+    global total xs y .g control chans dets vmemode view runinfo
+
+    catch {share update}
+    set control(mode) [lindex $control(knownmodes) $vmemode]
+
+    set view(integrate_done) 0
+    set view(norm_smpl_done) 0
+    set view(norm_mon_done)  0
+    SplitMats
+    GetRunInfo
+    Integrate
+    SequenceRead
+
+    # Apply view options
+
+    if {[string compare $runinfo(mode) "velocity"] == 0} { ScaleDoppler }
+    if {$view(norm_smpl)} { NormalizeSample  }
+    if {$view(norm_mon) } { NormalizeMonitor }
+    ShowNewDet $view(currentdet) 
+    return 0
+}
+
+
+proc Integrate { } {
+    global ydet xdet control chans view livetime
+
+    PutText "Integrating over velocity/PST channels."
+    BusyCursorOn
+    update
+    
+    #pv collapse {0 1} hvec
+    # set livetime [expr [hvec aref 0] * 20e-6]
+    # Get livetime from linked variable
+
+    #data collapse {0 1} hvec
+    #narray2vec hvec x ydet
+    #ydet set [mtx list hvec x]
+    ydet set [share dsum]
+    catch {.sum.l configure -text [ListSum]}
+    set ydet(0) 0 ;# Kludge for high counts in monitor channel
+    PutText ""
+    BusyCursorOff
+    update
+    set view(integrate_done) 1
+    return $view(integrate_done)
+}
+
+#
+# Split block of data received from VME system into portions suitable for
+# writing to a file.
+#
+proc SplitMats { } {
+    global logs total work2 control livetime dets chans view
+    
+    PutText "Processing raw data"
+    BusyCursorOn
+    update
+
+    share split $control(mode)
+
+    PutText ""
+    BusyCursorOff
+    update
+    return 0
+}
+
+proc BusyCursorOn {} {
+    . configure -cursor watch
+    .g configure -cursor watch
+}
+
+proc BusyCursorOff {} {
+    . configure -cursor {}
+    .g configure -cursor crosshair
+}
+
+#
+# Normalize data to sample histograms
+#
+proc NormalizeSample { } {
+    global ydet xdet mode chans livetime view
+
+    PutText "Normalizing to sample histograms."
+    BusyCursorOn
+    update
+    # Multiply []/$normalize[] by 50000 to get rate in C/s
+    # Multiply []/$normalize[] by 50000/60=833.33 to get rate in C/min
+
+    #data map {
+    #	$normalize[] < 0.000000001 ? [] = 0 : [] = $[] * 833.33 / $normalize[];
+    #   } {normalize normalize}
+
+    PutText ""
+    BusyCursorOff
+    update
+    set view(norm_smpl_done) 1
+    return $view(norm_smpl_done)
+}
+
+#
+# Normalize data to monitor
+#
+proc NormalizeMonitor { } {
+    global control chans livetime view
+
+    if {!$view(norm_smpl_done)} { NormalizeSample }
+    PutText "Normalizing to monitor."
+    BusyCursorOn
+    update
+    # Fill narray normalize with values from monitor channel
+    #data export {0 0} [list 1 $control(veclen)] work2
+    #for {set i 0} {$i < 17} {incr i} {
+    #normalize import [list $i 0] work2
+    #}
+
+    #data map { 
+    #	$normalize[] < 0.000000001 ? divisor = 1 : divisor = $normalize[]; 
+    #	[] /= $divisor; 
+    #   } {normalize normalize}
+
+    PutText ""
+    BusyCursorOff
+    update
+    set view(norm_mon_done) 1
+    return $view(norm_mon_done)
+}
+
+# Print a list of sums over all velocity/PST channels
+#
+#
+proc BuildSumTable { } {
+    toplevel .sum
+    wm withdraw .sum
+    label .sum.l -width 30 -height 20 -font fixed -justify left -anchor nw
+    frame .sum.b
+    button .sum.b.dismiss -text "Close" -command HideSumTable
+    button .sum.b.print -text "Print" -command PrintSum
+    pack .sum.l .sum.b -side top -expand true -fill x
+    pack .sum.b.print .sum.b.dismiss -in .sum.b -side left -fill x -expand true
+    wm protocol .sum WM_DELETE_WINDOW HideSumTable
+}
+
+proc HideSumTable {} {
+    wm withdraw .sum
+}
+
+proc ShowSumTable {} {
+    wm deiconify .sum
+}
+
+proc PrintSum {} {
+    global control
+    if [catch {lindex [.sum.l configure -text] end} output] { return }
+
+    if [catch { eval exec echo \{$output\} | $control(lprcmd) } result] {
+	PutText $result
+    }
+}
+
+proc ListSum { } {
+    global ydet xdet mode dets chans livetime view runinfo
+
+    set output ""
+    if {$runinfo(tottime) > 1.0} {
+	set ltime [expr $runinfo(tottime) / 60.0]
+    } else {
+	set ltime 1.0
+    }
+    append output "Live Time(min):    "
+    append output [format "%10.2f\n" $ltime]
+    append output "Det   Counts(raw) Rate(c/min)\n"
+    for {set i 0} {$i < 17} {incr i} {
+	append output [format " %2.0f" $xdet($i)]
+	append output [format " %12.0f" $ydet($i)]
+	append output [format " %12.2f" [expr $ydet($i) / $ltime]]
+	append output "\n"
+    }
+    set trate 0.0
+    for {set i 5} {$i < 17} {incr i} { set trate [expr $trate + $ydet($i)]}
+    append output "Rate (5-16):     "
+    append output [format "%12.2f" [expr $trate / $ltime]]
+    return $output
+}
+
+proc DisableMaskEntry { } {
+    for {set i 1} {$i < 17} {incr i} {
+	.dmask.$i configure -state disabled
+    }
+}
+
+proc EnableMaskEntry { } {
+    for {set i 1} {$i < 17} {incr i} {
+	.dmask.$i configure -state normal
+    }
+}
+
+proc BuildMaskTable { } {
+    global view
+    toplevel .mask
+    wm withdraw .mask
+    frame .mask.f
+    label .mask.f.label -text "Detector Mask"
+    pack .mask.f.label -in .mask.f -side top
+    for {set i 1} {$i < 20} {incr i} {
+	checkbutton .mask.f.det$i -text Det[format "%02d" $i] \
+		-variable view($i) -command "ShowNewDet sum"
+	pack .mask.f.det$i -in .mask.f -side top
+    }
+    button .mask.dismiss -text "Close" -command HideMaskTable
+    pack .mask.f .mask.dismiss -side top -expand true -fill x
+    wm protocol .mask WM_DELETE_WINDOW HideMaskTable
+}
+
+proc ApplyNormMon { args } {
+    global view
+    if {$view(norm_mon)} {
+	if {!$view(norm_mon_done)} { 
+	    NormalizeMonitor 
+	    ShowNewDet $view(currentdet)
+	}
+    } else {
+	if {$view(norm_mon_done)} {
+	    set view(norm_mon_done) 0
+	    SplitMats
+	    if {$view(norm_smpl)} {NormalizeSample}
+	    ShowNewDet $view(currentdet)
+	}
+    }
+}
+
+proc ApplyNormSmpl { args } {
+    global view
+    if {$view(norm_smpl)} {
+	if {!$view(norm_smpl_done)} { 
+	    NormalizeSample 
+	    ShowNewDet $view(currentdet)
+	}
+    } else {
+	if {$view(norm_smpl_done)} {
+	    set view(norm_smpl_done) 0
+	    SplitMats
+	    ShowNewDet $view(currentdet)
+	}
+    }
+}
+
+# If we're running in standard mode, scale the display to the spectrometer's
+# dynamic range
+proc ScaleDoppler { args } {
+    global view control runinfo
+    if {$view(xauto)} {
+	DopplerSpeedGet
+	if { $control(dopspeed) < 5.1 } {
+	    .g xaxis configure -min -5.0 -max 5.0
+	} elseif { $control(dopspeed) < 15.1 } {
+	    .g xaxis configure -min -11.0 -max 11.0
+	} elseif { $control(dopspeed) < 27.1 } {
+	    .g xaxis configure -min -20.0 -max 20.0	
+	} elseif { $control(dopspeed) < 50.1 } {
+	    .g xaxis configure -min -36.0 -max 36.0
+	} else {
+	    .g xaxis configure -min {} -max {}
+	}
+    }
+}
+
+proc SaveData { } {
+    global y xs ydet control
+
+    set filename [tk_getSaveFile]
+    if {[string length $filename] == 0} { return } 
+    update
+
+    if [catch {open $filename w} outfile] {
+	PutText "Could not open $filename for writing."
+	return
+    }
+
+    for {set i 0} { $i < [xs length] } { incr i } {
+	# write x axis in the actual units we're using for the plot
+	set xval $xs($i)
+	if { $control(veclen) == 20 } {
+	    if {![catch {set ydet($i)} yval]} {
+		# puts $outfile [format "%10.2f %10.2f" $xval $yval]
+		puts $outfile "$xval $yval"
+	    }
+	} else {
+	    if {![catch {set y($i)} yval]} {
+		# puts $outfile [format "%10.2f %10.2f" $xval $yval]
+		puts $outfile "$xval $yval"
+	    }
+	}
+    }
+    close $outfile
+}
+
+proc ApplyScale { } {
+    global view
+
+    # xaxis
+    if {$view(xauto)} {
+	.g xaxis configure -min {} -max {}
+    } else {
+	# Check to make sure limits are real numbers
+	if [catch {expr 1.0 * $view(xmin)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(xmin)\"" \
+		error 0 OK
+	    return
+	}
+	if [catch {expr 1.0 * $view(xmax)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(xmax)\"" \
+		error 0 OK
+	    return
+	}
+	.g xaxis configure -min $view(xmin) -max $view(xmax)
+    }
+    
+    # yaxis
+    if {$view(yauto)} {
+	.g yaxis configure -min {} -max {}
+    } else {
+	# Check to make sure limits are real numbers
+	if [catch {expr 1.0 * $view(ymin)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(ymin)\"" \
+		error 0 OK
+	    return
+	}
+	if [catch {expr 1.0 * $view(ymax)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(ymax)\"" \
+		error 0 OK
+	    return
+	}
+	.g yaxis configure -min $view(ymin) -max $view(ymax)
+    }
+}
+
+proc BuildScaleControl { } {
+    global view    
+    toplevel .scale
+    wm withdraw .scale
+
+    label .scale.xaxis -text "X axis"
+    radiobutton .scale.xauto -text "Autoscale" \
+	    -variable view(xauto) -value 1 
+    radiobutton .scale.xman  -text "Manual"    \
+	    -variable view(xauto) -value 0 
+    label .scale.xminl -text "Minimum" 
+    label .scale.xmaxl -text "Maximum" 
+    entry .scale.xmine -textvariable view(xmin) -width 10
+    entry .scale.xmaxe -textvariable view(xmax) -width 10
+
+    label .scale.yaxis -text "Y axis"
+    radiobutton .scale.yauto -text "Autoscale" \
+	    -variable view(yauto) -value 1 
+    radiobutton .scale.yman  -text "Manual"    \
+	    -variable view(yauto) -value 0 
+    label .scale.yminl -text "Minimum" 
+    label .scale.ymaxl -text "Maximum" 
+    entry .scale.ymine -textvariable view(ymin) -width 10
+    entry .scale.ymaxe -textvariable view(ymax) -width 10
+    button .scale.apply   -text "Apply"   -command ApplyScale
+    button .scale.dismiss -text "Close" -command HideScaleControl
+
+    grid .scale.xaxis .scale.xauto .scale.xman    -in .scale
+    grid x            .scale.xminl .scale.xmine   -in .scale
+    grid x            .scale.xmaxl .scale.xmaxe   -in .scale
+
+    grid .scale.yaxis .scale.yauto .scale.yman    -in .scale
+    grid x            .scale.yminl .scale.ymine   -in .scale
+    grid x            .scale.ymaxl .scale.ymaxe   -in .scale
+    grid .scale.apply     x        .scale.dismiss -in .scale
+    return .scale
+}
+
+proc HideScaleControl { } {
+    wm withdraw .scale
+}
+
+proc ShowScaleControl { } {
+    wm deiconify .scale
+}
+
+proc PrintCmdAccept { } {
+    global control
+    set control(lprcmd) $control(printcmd)
+}
+
+proc PrintCmdDismiss { } {
+    wm withdraw .print
+}
+
+proc PrintCmdShow { } {
+    wm deiconify .print
+}
+
+proc PrintCmdBuild { } {
+    global control
+
+    toplevel .print
+    wm withdraw .print
+    label .print.l -text "Enter Print Command: "
+    entry .print.e -textvariable control(printcmd)
+    button .print.dismiss -text "Close" -command PrintCmdDismiss
+    button .print.accept  -text "Accept"  -command PrintCmdAccept
+    grid .print.l       .print.e       -in .print
+    grid .print.accept  .print.dismiss -in .print -sticky ew
+    wm protocol .print WM_DELETE_WINDOW PrintCmdDismiss
+    return .print
+}
+
+proc PrintGraph { } {
+    global .g control runinfo view
+    set outfile "/tmp/hfbs[pid].ps"
+    if [catch {.g postscript output $outfile}] {
+	PutText "Cannot create postscript output"
+	return
+    }
+
+    set detstring ""
+    switch $view(currentdet) {
+	all { set detstring all }
+	0 { set detstring monitor }
+	sum {
+	    for {set i 0} {$i < 17} {incr i} {
+		if {[string length $detstring] > 0} {
+		    append detstring ","
+		}
+		if { $view($i) } { append detstring $i }
+	    }
+	}
+    }
+
+    set finalfile "/tmp/hfbs[pid]x.ps"
+    set timestring [format "%.2f " $runinfo(tottime)]
+    set f [open $finalfile w]
+    puts $f "%!PS"
+    puts $f "gsave"
+    puts $f "/Times-Roman findfont 14 scalefont setfont"
+    puts $f "792 0 translate 90 rotate"
+    puts $f " 72 720 moveto (Filename:) show"
+    puts $f "144 720 moveto ($runinfo(runfile)) show"
+    puts $f " 72 704 moveto (Comments:) show"
+    puts $f "144 704 moveto ($runinfo(comments)) show"
+    puts $f " 72 688 moveto (Mode:) show"
+    puts $f "144 688 moveto ($runinfo(mode)) show"
+    puts $f " 72 672 moveto (Start time:) show"
+    puts $f "144 672 moveto ($runinfo(starttime)) show"
+    puts $f " 72 656 moveto (Live time:) show"
+    puts $f "144 656 moveto ($timestring sec) show"
+    puts $f " 72 640 moveto (Detectors:) show "
+    puts $f "144 640 moveto ($detstring) show"
+    puts $f "grestore"
+    close $f
+    unset f
+
+    if [catch {exec cat $outfile >> $finalfile} result] {
+	PutText $result
+    }
+
+    if [catch {eval exec $control(lprcmd) $finalfile} result] {
+	PutText $result
+    }
+    catch {exec rm -f $outfile} result
+    catch {exec rm -f $finalfile} result
+}
+
+proc PSTSpeedSet { } {
+    global control
+
+    if {0 > $control(pstspeed)} {
+	set result "ERR:\nSpecify PST Speed > 0!"
+	set control(pstspeed) 0
+    } else {
+	catch {Launch pst speed $control(pstspeed)} result
+    }
+    PutText $result
+    PSTDialogHide
+}
+
+proc PSTDialogBuild { } {
+    global control
+
+    set s [toplevel .pst]
+    wm withdraw $s
+    set sP [label .pst.setl  -text "PST Speed Setpoint:"]
+    set sp [label .pst.setp  -textvariable control(pstspdset)]
+    set sl [label .pst.label -text "Desired PST Speed:"]
+#    set se [entry .pst.entry -textvariable control(pstspeed) -state disabled ]
+    set sO [radiobutton .pst.on -text "Full speed (4728.0)" -variable control(pstspeed) \
+	    -value 4802.0]
+    set so [radiobutton .pst.off -text "Off (0.0)" -variable control(pstspeed) \
+	    -value 0.0]
+    set sE [button .pst.enable -text "Enable" -command PSTEnable]
+    set sD [button .pst.disble -text "Disable" -command PSTDisable]
+    set ss [button .pst.set -text "Accept" -command PSTSpeedSet]
+    set sb [button .pst.bye -text "Close" -command PSTDialogHide]
+#    grid $sP $sp -in $s -sticky w
+    grid $sl -   -in $s -stick w
+    grid $sO -   -in $s -sticky w
+    grid $so -   -in $s -sticky w
+    grid $sE $sD -in $s -sticky ew
+    grid $ss $sb -in $s -sticky ew
+    wm protocol $s WM_DELETE_WINDOW PSTDialogHide
+    return $s
+}
+
+proc PSTDialogShow { } {
+    global control
+    if {![catch {Launch pst info} result]} {
+	set control(pstspdset) $result
+	set control(pstspeed)  $result
+    }
+    wm deiconify .pst
+}
+
+proc PSTDialogHide { } {
+    wm withdraw .pst
+}
+
+proc DopplerDialogBuild { } {
+    global control
+
+    set s [toplevel .doppler]
+    wm withdraw $s
+
+#    set s0 [label .doppler.setl    -text "Doppler Speed Setpoint:"]
+#    set s1 [label .doppler.setp    -textvariable control(dopspdset)]
+#    set sl [label .doppler.speedl  -text "Desired Doppler Speed:"]
+#    set se [entry .doppler.speede  -textvariable control(dopspeed)]
+#    set sL [label .doppler.amplil  -text "Oscillation Amplitude:"]
+#    set sa [entry .doppler.amplie  -textvariable control(doposcamp)]
+#    set sn [radiobutton .doppler.oscno  -text Constant \
+#	    -variable control(doposc) -value 0]
+#    set sy [radiobutton .doppler.oscyes -text Oscillate \
+#	    -variable control(doposc) -value 1]
+
+    set tF1 [frame .doppler.f1 -bd 2 -relief ridge]
+    set s0 [label .doppler.setl -text "Desired Dynamic Range:"]
+    set s1 [radiobutton .doppler.set11 -text "11 ueV (15 Hz)" \
+		-variable control(dopspeed) -value 15.0 ]
+    set s2 [radiobutton .doppler.set17 -text "15 ueV (22 Hz)" \
+		-variable control(dopspeed) -value 22.0 ]
+    set s3 [radiobutton .doppler.set35 -text "35 ueV (50 Hz)" \
+		-variable control(dopspeed) -value 50.0 ]
+
+    set tF2 [frame .doppler.f2 -bd 2 -relief ridge]
+    set s4 [label .doppler.set2 -text "Stop Doppler (Brake)"]
+    set s5 [radiobutton .doppler.set05 -text "Brake  ( 5 Hz)" \
+		-variable control(dopspeed) -value  5.0 ]
+    set s6 [radiobutton .doppler.set00 -text "Brake  ( 0 Hz)" \
+		-variable control(dopspeed) -value  0.0 ]
+
+    set sE [button .doppler.enable -text "Enable" -command DopplerEnable]
+    set sD [button .doppler.disble -text "Disable" -command DopplerDisable]
+    set ss [button .doppler.set -text "Accept"  -command DopplerSpeedSet]
+    set sb [button .doppler.bye -text "Close" -command DopplerDialogHide]
+
+    grid $tF1 - -in $s -sticky ew
+    grid $s0 - -in $tF1 -sticky w
+    grid $s1 - -in $tF1 -sticky w
+    grid $s2 - -in $tF1 -sticky w
+    grid $s3 - -in $tF1 -sticky w
+
+    grid $tF2 - -in $s -sticky ew
+    grid $s4 - -in $tF2 -sticky w
+    grid $s5 - -in $tF2 -sticky w
+    grid $s6 - -in $tF2 -sticky w
+
+    grid $sE $sD -in $s -sticky ew
+    grid $ss $sb -in $s -sticky ew
+    wm protocol $s WM_DELETE_WINDOW DopplerDialogHide
+    return $s
+}
+
+proc DopplerSpeedSet { } {
+    global control
+
+    if {$control(doposc)} {
+	if {30 > $control(doposcper)} {
+	    set result "ERR:\nSpecify oscillation period > 30 sec!"
+	    set control(doposcper) 30
+	} else {
+	    catch {Launch doppler oscillate $control(dopspeed) \
+		    $control(doposcamp) $control(doposcper)} result
+	}
+    } else {
+	if { 0 > $control(dopspeed) } {
+	    set result "ERR:\nSpecify speed > 0!"
+	    set control(dopspeed) 0
+	} else {
+	    catch {Launch doppler speed $control(dopspeed)} result
+	}
+    }
+    PutText $result
+    DopplerDialogHide
+}
+
+proc DopplerSpeedGet { } {
+    global control
+    if {![catch {Launch doppler info} result]} {
+	set control(dopspdset) $result
+	set control(dopspeed)  $control(dopspdset)
+    }
+}
+
+proc DopplerDialogShow { } {
+    DopplerSpeedGet
+    wm deiconify .doppler
+}
+
+proc DopplerDialogHide { } {
+    wm withdraw .doppler
+}
+
+proc PSTEnable { } {
+    catch {Launch pst enable} result
+    PutText $result
+}
+
+proc PSTDisable { } {
+    catch {Launch pst disable} result
+    PutText $result
+}
+
+proc DopplerEnable { } {
+    catch {Launch doppler enable} result
+    PutText $result
+}
+
+proc DopplerDisable { } {
+    catch {Launch doppler disable} result
+    PutText $result
+}
+
+proc TempDialogBuild { } {
+    global control
+
+    set t [toplevel .temperature]
+    wm withdraw $t
+    set tF1 [frame $t.f1 -bd 2 -relief ridge]
+    set tL [label $t.f1.conflab -text "Controller Configuration"]
+    set tc [label $t.f1.choice -text "Select Controller:" ]
+    set tl [tk_optionMenu $t.f1.list control(tempchoose) lk340 lk330 lk93c w5010 omcni scmag eurot cryo34 none]
+    set tS [label $t.f1.schoice -text "Sample Sensor:"]
+    tk_optionMenu $t.f1.slist control(sampsensor) A B C D
+    set tC [label $t.f1.cchoice -text "Control Sensor:"]
+    tk_optionMenu $t.f1.clist control(ctrlsensor) A B C D
+    set tF1A [button $t.f1.confaccept -text "Accept" -width 8 \
+	    -command TempConfig]
+    grid $tL -           -in $tF1 -sticky ew
+    grid $tc $t.f1.list  -in $tF1 -sticky ew
+    grid $tS $t.f1.slist -in $tF1 -sticky ew
+    grid $tC $t.f1.clist -in $tF1 -sticky ew
+    grid $tF1A -         -in $tF1
+
+
+    set tF2 [frame $t.f2 -bd 2 -relief ridge]
+    set tL  [label $t.f2.label -text "Controller Setpoint"]
+    set tP  [label $t.f2.slab  -text "Setpoint (K):" -width 12]
+    set tp [entry $t.setp  -textvariable control(tempset) -width 8]
+    set tF2A [button $t.f2.accept -text "Accept" -width 8 \
+	    -command TempSet]
+    grid $tL -           -in $tF2 -sticky ew
+    grid $tP $tp         -in $tF2 -sticky ew
+    grid $tF2A -         -in $tF2
+
+    set tF3 [frame $t.f3 -bd 2 -relief ridge]
+    set tL  [label $t.f3.label -text "Controller Ramp"]
+    set tR  [label $t.f3.rlab  -text "Rate (K/s):" -width 12]
+    set tr  [entry $t.f3.ramp  -textvariable control(tempramp) -width 8]
+    set tF3A [button $t.f3.accept -text "Accept" -width 8 \
+		  -command TempRamp]
+    grid $tL -           -in $tF3 -sticky ew
+    grid $tR $tr         -in $tF3 -sticky ew
+    grid $tF3A -         -in $tF3
+
+    set tb [button $t.bye -text "Close" -width 8 \
+	    -command TempDialogHide]
+
+    grid $tF1 -in $t -sticky ew
+    grid $tF2 -in $t -sticky ew
+    grid $tF3 -in $t -sticky ew
+    grid $tb  -in $t 
+
+    wm protocol $t WM_DELETE_WINDOW TempDialogHide
+    return $t
+}
+
+proc TempDialogShow { } {
+    wm deiconify .temperature
+}
+
+proc TempDialogHide { } {
+    wm withdraw .temperature
+}
+
+proc TempConfig { } {
+    global control
+
+    if [catch {Launch temperature select $control(tempchoose)} result] {
+	PutText $result
+	return "OK"
+    }
+
+    if {[string compare $control(tempchoose) none] == 0} {
+	return
+    } 
+
+    catch {Launch temperature configure sampsensor $control(sampsensor)}
+    catch {Launch temperature configure ctrlsensor $control(ctrlsensor)}
+
+    return [TempRead]
+}
+
+proc TempSet { } {
+    global control
+
+    # Make sure that the specified temperature is a valid floating point
+    # number before sending command to core program
+
+    if [catch {expr 1.0 * $control(tempset)} result] {
+	PutText "ERR:\nSetpoint must be a valid floating point number"
+	return
+    }
+
+    if {$result <= 0} {
+	PutText "ERR:\nSetpoint must be greater than zero!"
+	return
+    }
+
+    catch {Launch temperature set $control(tempset)} result
+    PutText $result
+}
+
+proc TempRead { } {
+    catch {Launch temperature read} result
+    PutText $result
+}
+
+proc TempRamp { } {
+    global control
+
+    # Make sure that the specified temperature is a valid floating point
+    # number before sending command to core program
+
+    if [catch {expr 1.0 * $control(tempramp)} result] {
+	PutText "ERR:\nRamp must be a valid floating point number"
+	return
+    }
+    
+    catch {Launch temperature ramp $control(tempramp)} result
+    PutText $result
+}
+
+##### Commands for handling run sequences
+proc SequenceRead { } {
+    global env sequence
+
+    if {![file exists $sequence(file)]} {
+	return
+    }
+
+    if [catch {open $sequence(file) r} sf] {
+	return 
+    }
+    
+    set contents [read $sf]
+    $sequence(list) delete 0 end
+    foreach s [split $contents \n] {
+	$sequence(list) insert end $s
+    }
+    close $sf
+}
+
+proc SequenceWrite { } {
+    global env sequence
+
+    set sf [open $sequence(file) w]
+    set contents [join [$sequence(list) get 0 end] "\n"]
+    puts -nonewline $sf $contents
+    close $sf
+}
+
+proc SequenceFind { } {
+    # Find the process ID of the core program
+    if [catch {exec ps ax | grep sequence | grep tclsh} result] {
+	return 0
+    }
+    if {![regexp {^[ ]*([0-9]+)} $result match pid]} {
+	#Can't determine process ID of sequence program
+	return -code error -1
+    }
+    return $pid
+}
+
+proc SequenceStart { } {
+    global env sequence
+    if [catch {Launch sequence status} result] {
+	PutText $result
+	return
+    }
+
+    if {$result} {
+	set answer [tk_messageBox -type yesno -message \
+		"Sequence in progress: Cancel?"]
+	switch $answer {
+	    yes { 
+		if [catch {Launch sequence abort} result] {
+		    return -code error $result
+		}
+	    }
+	    no {
+		return
+	    }
+	}
+    }
+
+    # Start sequence
+    if [catch {Launch sequence start} result] {
+	PutText $result
+    }
+
+}
+
+# Kill a sequence currently in progress
+#
+proc SequenceKill { args } {
+    global sequence
+
+    catch {Launch sequence stop} result
+    PutText $result
+
+}
+
+proc SequenceEditorBuild { parent } {
+    global env sequence
+
+    # initialize array sequence
+    set sequence(run)  0
+    set sequence(scan) 0
+    set sequence(wait) 1
+    set sequence(temp) 300.0
+    set sequence(dop)  10.0
+    set sequence(ramp) 0.0
+    set sequence(file) $env(HOME)/hfbs.seq
+    set sequence(toplevel) [toplevel $parent]
+    wm withdraw $sequence(toplevel)
+
+    set tf [frame $parent.top]
+    set sequence(list) [ScrolledListbox $tf.l -width 20 -height 10]
+
+    set f [frame $tf.f1 -bd 2 -relief ridge]
+    set frl [label $f.runlab    -text Run]
+    set fsl [label $f.scanlab   -text Scan]
+    set ftl [label $f.templab   -text Temperature]
+    set fRl [label $f.ramplab   -text "Temp Ramp"]
+    set fwl [label $f.waitlab   -text Wait]
+    set fdl [label $f.doplab    -text Doppler]
+    set fru [label $f.rununits  -text (Buffer)]
+    set fsu [label $f.scanunits -text (Buffer)]
+    set ftu [label $f.tempunits -text (K)]
+    set fRu [label $f.rampunits -text (K/min)]
+    set fwu [label $f.waitunits -text (Min)]
+    set fdu [label $f.dopunits  -text (Hz)]
+    set fre [entry $f.runentry  -width 10 -textvariable sequence(run)]
+    set fse [entry $f.scanentry -width 10 -textvariable sequence(scan)]
+    set fte [entry $f.tempentry -width 10 -textvariable sequence(temp)]
+    set fRe [entry $f.rampentry -width 10 -textvariable sequence(ramp)]
+    set fwe [entry $f.waitentry -width 10 -textvariable sequence(wait)]
+    set fde [entry $f.dopentry  -width 10 -textvariable sequence(dop)]
+    set fri [button $f.runbut   -text Insert -command SequenceInsertRun]
+    set fsi [button $f.scanbut  -text Insert -command SequenceInsertScan]
+    set fti [button $f.tempbut  -text Insert -command SequenceInsertTemp]
+    set fRi [button $f.rampbut  -text Insert -command SequenceInsertRamp]
+    set fwi [button $f.waitbut  -text Insert -command SequenceInsertWait]
+    set fdi [button $f.dopbut   -text Insert -command SequenceInsertDop]
+
+    grid $frl $fru $fre $fri -in $f -sticky w
+    grid $fsl $fsu $fse $fsi -in $f -sticky w
+    grid $ftl $ftu $fte $fti -in $f -sticky w
+    grid $fRl $fRu $fRe $fRi -in $f -sticky w
+    grid $fwl $fwu $fwe $fwi -in $f -sticky w
+    grid $fdl $fdu $fde $fdi -in $f -sticky w
+
+    set bf  [frame $parent.bot]
+    set fd  [button $bf.delete   -text Delete  -width 8 \
+	    -command SequenceDeleteElement]
+    set fc  [button $bf.clear    -text Clear   -width 8 \
+	    -command SequenceClear]
+    set fv  [button $bf.refresh  -text Refresh -width 8 \
+	    -command SequenceRead]
+    set fa  [button $bf.apply    -text Apply   -width 8 \
+	    -command SequenceWrite]
+    set fx  [button $bf.dismiss  -text Close -width 8 \
+	    -command SequenceEditorHide]
+
+    pack $fd $fc $fv $fa $fx -side left -in $bf -expand true -fill x
+    pack $tf.l $f -side left -in $tf
+    pack $tf $bf -side top -in $sequence(toplevel) 
+    wm protocol $sequence(toplevel) WM_DELETE_WINDOW SequenceEditorHide
+    return $sequence(toplevel)
+}
+
+proc SequenceClear { } {
+    global sequence
+    $sequence(list) delete 0 end
+}
+
+proc SequenceDeleteElement { } {
+    global sequence
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) delete $idx
+}
+
+proc SequenceInsertRun { } {
+    global sequence
+    set cmd "run buffer $sequence(run)"
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) insert $idx $cmd
+}
+
+proc SequenceInsertScan { } {
+    global sequence
+    set cmd "scan buffer $sequence(scan)"
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) insert $idx $cmd
+}
+
+proc SequenceInsertTemp { } {
+    global sequence
+    set cmd "temperature set $sequence(temp)"
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) insert $idx $cmd
+}
+
+proc SequenceInsertWait { } {
+    global sequence
+    set cmd "wait minutes $sequence(wait)"
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) insert $idx $cmd
+}
+
+proc SequenceInsertDop { } {
+    global sequence
+    set cmd "doppler speed $sequence(dop)"
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) insert $idx $cmd
+}
+
+proc SequenceInsertRamp { } {
+    global sequence
+    set cmd "temperature ramp $sequence(ramp)"
+    set idx [$sequence(list) curselection]
+    if {[string length $idx] == 0} {set idx end}
+    $sequence(list) insert $idx $cmd
+}
+
+proc SequenceEditorShow { } {
+    global sequence
+    SequenceRead
+    wm deiconify $sequence(toplevel)
+}
+
+proc SequenceEditorHide { } {
+    global sequence
+    wm withdraw $sequence(toplevel)
+}
+
+##### Commands for handling data acquisition
+
+proc RunStart { bufno } {
+    global hfbsbuf
+    if {$bufno >= $hfbsbuf(nbuf)} {
+	PutText "ERR:\nThere is no buffer $bufno!"
+	return
+    }
+    BusyCursorOn
+    set fail [catch {Launch run buffer $bufno} results]
+    PutText $results
+    if {!$fail} { Refresh }
+    BusyCursorOff
+    
+}
+
+proc RunAbort { } {
+    catch {Launch run abort} result
+    PutText $result
+    Refresh
+}
+
+proc RunTruncate { } {
+    BusyCursorOn
+    catch {Launch run truncate} result
+    PutText $result
+    Refresh
+    BusyCursorOff
+}
+
+proc RunUpdate { } {
+    BusyCursorOn
+    catch {Launch run update} result
+    PutText $result
+    Refresh
+    BusyCursorOff
+}
+
+proc RunFinish { } {
+    catch {Launch run finish} result
+    PutText $result
+    Refresh
+}
+
+proc ScanStart { bufno } {
+    global scanbuf
+    if {$bufno >= $scanbuf(nbuf)} {
+	PutText "ERR:\nThere is no buffer $bufno!"
+	return
+    }
+    BusyCursorOn
+    set fail [catch {Launch scan buffer $bufno} results]
+    PutText $results
+    if {!$fail} { Refresh }
+    BusyCursorOff
+    
+}
+
+proc ScanStop { } {
+    catch {Launch scan abort} result
+    PutText $result
+}
+
+#####
+
+proc ViewSingle { args } {
+    global view
+    if {[string compare $view(currentdet) single] == 0} {
+	for {set i 1} {$i < 17} {incr i} { 
+	    .g element configure e$i -hide [expr !$view($i)]
+	}
+    } else {
+	ShowNewDet sum
+    }
+}
+
+proc ShowNewDet { i } {
+    global .g total xs y xdet ydet control data view runinfo
+
+    if {$view(norm_smpl)} { 
+	set smpl_norm "sample"
+    } else {
+	set smpl_norm "none"
+    }
+
+    if {$view(norm_mon)} {
+	set mon_norm "monitor"
+    } else {
+	set mon_norm "none"
+    }
+
+    if {[string compare $i "all"] == 0} {
+	if {!$view(integrate_done)} { Integrate }
+	set view(detlabel) "Sum over energy bins"
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 1
+	.g element configure e0 -hide 0
+	for {set i 1} {$i < 17} {incr i} { .g element configure e$i -hide 1}
+	.g element configure e0 -xdata xdet -ydata ydet
+	.g xaxis configure -title "Detector"
+	set view(currentdet) all
+	return 
+    } elseif {[string compare $i "single"] == 0} {
+	set view(detlabel) "Detectors"
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 0
+	switch $control(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {     
+		if {$runinfo(varytemp) } {
+		    .g xaxis configure -title "Temperature (K)"       
+		} else {
+		    .g xaxis configure -title "Time (sec)"
+		}
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+
+	#xs set [mtx list xvec 0 x]
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	.g element configure e0 -hide 1
+	for {set i 1} {$i < 17} {incr i} {
+
+	    y${i} set [share det $i]
+	    .g element configure e${i} -xdata xs -ydata y$i \
+		    -hide [expr !$view($i)]
+	}
+	set view(currentdet) single
+	return
+    } elseif {[string compare $i "sum"] == 0} {
+	set view(detlabel) "Sum over detectors"
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 1
+	.g element configure e0 -hide 0
+	set view(currentdet) $i
+	for {set i 1} {$i < 17} {incr i} { .g element configure e$i -hide 1}
+	set ndets 0
+	for {set i 0} {$i < 17} {incr i} {
+	    lappend mask $view($i)
+	    if {$view($i)} { incr ndets }
+	}
+
+	y set [share ndsum $mask $smpl_norm $mon_norm]
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+
+	xs set [share energy]
+	.g element configure e0 -xdata xs -ydata y
+	switch $control(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {
+		if {$runinfo(varytemp)} {
+		    .g xaxis configure -title "Temperature (K)"
+		} else {
+		    .g xaxis configure -title "Time (sec)"
+		}
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+    } elseif [regexp {sample(.*)} $i match s_typ] {
+	switch $s_typ {
+	    mon {
+		#narray2vec pv 0 x y
+		y set [share pv]
+	    }
+	    lo {
+		if {[string compare $control(mode) "pst"] != 0} {
+		    return -code error "ERR:\nNot available in this mode"
+		}
+		#narray2vec pv 1 x y
+		y set [mtx list pv 1 x]
+	    }
+	    hi {
+		if {[string compare $control(mode) "pst"] != 0} {
+		    return -code error "ERR:\nNot available in this mode"
+		}
+		#narray2vec pv 5 x y
+		y set [mtx list pv 5 x]
+	    }
+	    default {
+		return -code error "ERR:\nSampling type not available"
+	    }
+	}
+
+	set view(detlabel) "P(v)"
+	.g configure -title $view(detlabel)
+	set view(currentdet) $i
+	.g legend configure -hide 1
+	.g element configure e0 -hide 0
+	for {set i 1} {$i < 17} {incr i} { .g element configure e$i -hide 1}
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	#narray2vec xvec 0 x xs
+	xs set [mtx list xvec 0 x]
+	.g element configure e0 -xdata xs -ydata y
+	switch $control(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {	
+		if {$runinfo(varytemp)} {
+		    .g xaxis configure -title "Temperature (K)"
+		} else {
+		    .g xaxis configure -title "Time (sec)"
+		}
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+    } else {
+	if {$i >= 19} {
+	    PutText "ERR:\nRequested detector out of bounds"
+	    return
+	}
+	set view(currentdet) $i
+
+	y set [share det $i]
+	if {$i == 0} {
+	    set view(detlabel) Monitor
+	} else {
+	    set view(detlabel) [format "Det: %2d" $i]
+	}
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 1
+	for {set j 0} {$j < 17} {incr j} {
+	    .g element configure e$j -hide 1
+	}
+	.g element configure e$i -hide 0
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	#narray2vec xvec 0 x xs
+	#xs set [mtx list xvec 0 x]
+	.g element configure e0 -xdata xs -ydata y
+	switch $control(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {      .g xaxis configure -title "Scan Pt"      }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+    }
+}
+
+proc MonitorStart { } {
+    # Start sequence
+    catch {exec /usr/local/bin/monitor &}
+}
+
+proc GetStatus { } {
+    catch {Launch status brief} result
+    PutText $result
+}
+
+proc PutText { input } {
+    .t configure -text $input
+}
+
+proc AppendText { input } {
+    set displaytext [.t configure -text]
+    if {[string length $displaytext] > 0} {
+	append displaytext "\n"
+    }
+    append displaytext $input
+    .t configure -text $displaytext
+}
+
+proc ReBuildViewMenu { } {
+    global control dets
+    set mvm .mbar.view.menu
+    $mvm delete 0 end
+    $mvm add command -label "Refresh" -command "Refresh"
+    $mvm add command -label "All" -command "ShowNewDet all"
+    $mvm add command -label "List" -command DisplaySum
+    for {set i 0} {$i < $dets($control(mode))} {incr i} {
+	$mvm add command -label "Det$i" -command "ShowNewDet $i"
+    }
+}
+
+# Procedures for displaying run status
+#
+#
+proc GetRunInfo { } {
+    global runinfo
+
+    if [catch {Launch array get run} results] {
+	set runinfo(status) "Run Info unavailable"
+	return
+    }
+    array set remoterun $results
+    if [catch {Launch run status} results] {
+	set runinfo(status) "Run status unavailable"
+	return
+    } 
+    foreach f [array names remoterun] {
+	set runinfo($f) $remoterun($f)
+    }
+    set runinfo(starttime) [clock format $remoterun(starttime) \
+	    -format "%d-%b-%Y %H:%M"]
+
+    set runinfo(inprogress) $results
+
+    if {$runinfo(inprogress)} {
+	set runinfo(status) "Progress $runinfo(curcycle)/$runinfo(ncycles)"
+	if [winfo exists $runinfo(statwid)] {
+	    $runinfo(statwid) configure -foreground #008800
+	}
+    } else {
+	set runinfo(status) "Stopped"
+	if [winfo exists $runinfo(statwid)] {
+	    $runinfo(statwid) configure -foreground red
+	}
+    }
+    if {[llength $remoterun(dopfreq)] <= 0} { set remoterun(dopfreq) 0 }
+    set runinfo(doppler) [format %5.2f [lindex $remoterun(dopfreq) end]]
+}
+
+proc StatusPanelBuild { parent } {
+    global runinfo 
+    label $parent.flab     -text "Filename:" -anchor w
+    label $parent.clab     -text "Comments:" -anchor w
+    label $parent.mlab     -text "Mode:"     -anchor w
+    label $parent.filename -textvariable runinfo(runfile) -width 30 \
+	    -foreground blue -anchor w
+    label $parent.comments -textvariable runinfo(comments) \
+	    -foreground blue -anchor w
+    label $parent.mode     -textvariable runinfo(mode) -foreground blue
+    label $parent.startlab -text "Start:"
+    label $parent.start    -textvariable runinfo(starttime) -foreground blue
+    set runinfo(statwid) [label $parent.curstat  -textvariable runinfo(status)]
+    label $parent.timelab  -text "Time (sec):"
+    label $parent.time     -textvariable runinfo(tottime) -foreground blue
+    label $parent.dopplerl -text "Doppler (Hz):"
+    label $parent.doppler  -textvariable runinfo(doppler) -foreground blue \
+	    -anchor e
+    label $parent.sampletl -text "Tsample  (K):"
+    label $parent.samplet  -textvariable runinfo(curtemp) -foreground blue \
+	    -anchor e
+
+    grid $parent.flab     -row 0 -column 0 -sticky w
+    grid $parent.mlab     -row 1 -column 0 -sticky w
+    grid $parent.clab     -row 2 -column 0 -sticky w
+    grid $parent.filename -row 0 -column 1 -sticky w
+    grid $parent.startlab -row 0 -column 2 -sticky w
+    grid $parent.start    -row 0 -column 3 -sticky w
+    grid $parent.timelab  -row 0 -column 4 -sticky w
+    grid $parent.time     -row 0 -column 5 -sticky w
+    grid $parent.mode     -row 1 -column 1 -sticky w
+    grid $parent.comments -row 2 -column 1 -columnspan 5 -sticky w
+    grid $parent.curstat  -row 3 -column 0 -sticky w
+    grid $parent.dopplerl -row 0 -column 6 -sticky w 
+    grid $parent.doppler  -row 0 -column 7 -sticky e
+    grid $parent.sampletl -row 1 -column 6 -sticky w
+    grid $parent.samplet  -row 1 -column 7 -sticky e
+}
+
+###############################################################################
+# Procedures for managing run buffer information
+#
+proc HFBSBufInit {} {
+    global hfbsbuf hfbsbufdisp
+}
+
+proc HFBSBufDisp { recno } {
+    global hfbsbufdisp hfbsbuf
+    foreach fld $hfbsbuf(flds) {
+	set icpdisp($fld) $hfbsbuf($recno,$fld)
+    }
+    set num [format "%2d" $recno]
+    set hfbsdisp(label) "IBuffer No: $num"
+    set hfbsdisp(current) $recno
+}
+
+proc HFBSBufEntryCreate { parent } {
+    global hfbsbufdisp
+    
+    label $parent.bufnolabel -textvariable hfbsbufdisp(label)
+    label $parent.commentlabel -text "Comment:"
+    entry $parent.comment -width 40 -textvariable hfbsbufdisp(comments)
+    label $parent.userlabel -text "User:"
+    entry $parent.user -width 40 -textvariable hfbsbufdisp(user)
+    label $parent.ncyclabel -text "N cycles:"
+    entry $parent.ncyc -width 10 -textvariable hfbsbufdisp(ncycles)
+    label $parent.cyctimelabel -text "Cycle time:"
+    entry $parent.cyctime -width 10 -textvariable hfbsbufdisp(cyctime)
+    label $parent.t0label -text "T0:"
+    entry $parent.t0 -width 10 -textvariable hfbsbufdisp(t0)
+    label $parent.dtlabel -text "Delta-T:"
+    entry $parent.dt -width 10 -textvariable hfbsbufdisp(dt)
+    label $parent.model -text "Mode:" 
+    radiobutton $parent.modes -text PST -variable hfbsbufdisp(mode) \
+		-value pst
+    radiobutton $parent.modet -text Time -variable hfbsbufdisp(mode) \
+		-value time
+    radiobutton $parent.modeh -text Velocity -variable hfbsbufdisp(mode) \
+		-value velocity 
+    label $parent.optl -text "Options:" 
+    checkbutton $parent.optrt -text "Rec Temp" -variable hfbsbufdisp(readtemp)
+    checkbutton $parent.optct -text "Check Temp" \
+	    -variable hfbsbufdisp(checktemp)
+    checkbutton $parent.optcd -text "Check Dop" \
+	    -variable hfbsbufdisp(checkdop)
+    button $parent.accept  -text "Accept"  -command HFBSBufUpdate
+    button $parent.dismiss -text "Close" -command HFBSBufEditHide
+
+    grid $parent.bufnolabel -row 0 -column 0
+    grid $parent.commentlabel -row 0 -column 1 -sticky w
+    grid $parent.comment -row 0 -column 2 -columnspan 4 -sticky ew
+    grid $parent.userlabel -row 1 -column 1 -sticky w
+    grid $parent.user -row 1 -column 2 -columnspan 3 -sticky ew
+    grid $parent.ncyclabel -row 2 -column 1 -sticky w
+    grid $parent.ncyc -row 2 -column 2 -sticky w
+    grid $parent.cyctimelabel -row 2 -column 3 -sticky w
+    grid $parent.cyctime -row 2 -column 4 -sticky e
+    grid $parent.t0label -row 3 -column 1 -sticky w
+    grid $parent.t0 -row 3 -column 2 -sticky w
+    grid $parent.dtlabel -row 3 -column 3 -sticky w
+    grid $parent.dt -row 3 -column 4 -sticky e
+    grid $parent.model -row 4 -column 1 -sticky w
+    grid $parent.modes -row 4 -column 2 -sticky w
+    grid $parent.modet -row 4 -column 3 -sticky w
+    grid $parent.modeh -row 4 -column 4 -sticky w
+    grid $parent.optl  -row 5 -column 1 -sticky w
+    grid $parent.optrt -row 5 -column 2 -sticky w
+    grid $parent.optct -row 5 -column 3 -sticky w
+    grid $parent.optcd -row 5 -column 4 -sticky w
+    grid $parent.accept  -row 6 -column 0
+    grid $parent.dismiss -row 6 -column 4 
+
+    return $parent
+}
+
+proc HFBSBufList { } { 
+    global hfbsbufdisp hfbsbuf
+    # Clear out our list if it contains anything.
+    set lbox $hfbsbufdisp(lbox)
+    $lbox delete 0 end
+    $lbox configure -font fixed
+    for {set i 0} {$i < $hfbsbuf(nbuf)} {incr i} {
+	$lbox insert end [HFBSBufFormatRec $i]
+    }
+
+    bind $lbox <Double-ButtonPress-1> "HFBSBufDisp \[$lbox curselection\]"
+    bind $lbox <Return> "HFBSBufDisp \[$lbox curselection\]"
+}
+
+proc HFBSBufDisp { recno } {
+    global hfbsbufdisp hfbsbuf
+    foreach fld $hfbsbuf(flds) {
+	set hfbsbufdisp($fld) $hfbsbuf($recno,$fld)
+    }
+    set num [format "%2d" $recno]
+    set hfbsbufdisp(label) "Buffer No: $num"
+    set hfbsbufdisp(current) $recno
+}
+
+proc HFBSBufFormatRec { recno } {
+    global hfbsbuf
+    set output [format "%2d " $recno]
+    append output [binary format A20 $hfbsbuf($recno,comments)]
+    append output [format "%6d "     $hfbsbuf($recno,ncycles)]
+    append output [format "%6d "     $hfbsbuf($recno,cyctime)]
+    append output [format "%6.2f "   $hfbsbuf($recno,t0)]
+    append output [format "%6.2f "   $hfbsbuf($recno,dt)]
+    append output [binary format A10 $hfbsbuf($recno,mode)]
+    return $output
+}
+
+proc HFBSBufUpdate { } {
+    global hfbsbufdisp hfbsbuf
+    set recno $hfbsbufdisp(current)
+    foreach fld $hfbsbuf(flds) {
+	set hfbsbuf($recno,$fld) $hfbsbufdisp($fld)
+    }
+    # update display on the list
+    set lbox $hfbsbufdisp(lbox)
+    $lbox delete $recno
+    $lbox insert $recno [HFBSBufFormatRec $recno]
+    # update buffer information on disk
+    HFBSBufWriteFile
+}
+
+proc HFBSBufEditShow { } {
+    global hfbsbuf
+    if [winfo exists $hfbsbuf(toplevel)] {
+	wm deiconify $hfbsbuf(toplevel)
+    }
+}
+
+proc HFBSBufEditHide { } {
+    global hfbsbuf
+    if [winfo exists $hfbsbuf(toplevel)] {
+	wm withdraw $hfbsbuf(toplevel)
+    }
+}
+
+proc HFBSBufWriteFile { } {
+    global hfbsbuf env
+
+    set f [open $env(HOME)/hfbsbuf.prm w]
+    for {set i 0} {$i < $hfbsbuf(nbuf)} {incr i} {
+	foreach fld $hfbsbuf(flds) {
+	    switch $fld {
+		comments {
+		    regsub -all {(\[|\"|\])} $hfbsbuf($i,$fld) {\\\0} comments
+		    set outline "set hfbsbuf($i,$fld) \"$comments\""
+		}
+		user {
+		    regsub -all {(["])} $hfbsbuf($i,$fld) "\\\"" user
+		    set outline "set hfbsbuf($i,$fld) \"$user\""
+		}
+		default {
+		    set outline "set hfbsbuf($i,$fld) $hfbsbuf($i,$fld)"
+		}
+	    }
+	    puts $f $outline
+	}
+    }
+    close $f
+}
+
+proc HFBSBufReadFile { } {
+    global env
+    if {![file exists $env(HOME)/hfbsbuf.prm]} {
+	return -code error "No parameter file"
+    }
+    uplevel #0 source $env(HOME)/hfbsbuf.prm
+}
+
+proc HFBSBufEditBuild { } {
+    global hfbsbuf hfbsbufdisp
+    set hfbsbuf(toplevel) [toplevel .runprep ]
+    wm title .runprep "Run Setup"
+    wm withdraw .runprep
+
+    ScrolledLabelledListbox .runprep.l \
+	    "No Comment               Ncyc CycTim     T0     Dt Mode" \
+	    -height 5 -width 50
+    set hfbsbufdisp(lbox) .runprep.l.list
+
+    notebook_create .runprep.e
+    set page [notebook_page .runprep.e hbuf ]
+    HFBSBufEntryCreate $page
+    notebook_display .runprep.e hbuf
+
+# gaspar begin
+    notebook_create .runprep.b
+    set page2 [notebook_page .runprep.b hbuf ]
+    HFBSBufopCreate $page2
+    notebook_display .runprep.b hbuf
+# gaspar end
+
+# gaspar begin
+    pack .runprep.l -expand true -fill x -in .runprep
+    pack .runprep.e -side top    -fill x -in .runprep 
+    pack .runprep.b -side bottom -fill x    -in .runprep 
+# gaspar end
+    wm protocol .runprep WM_DELETE_WINDOW HFBSBufEditHide
+    return .runprep
+}
+
+###############################################################################
+# Procedures for managing scan buffer information
+#
+proc ScanBufInit {} {
+    global hfbsbuf hfbsbufdisp
+}
+
+
+
+# gaspar begin
+proc ScanBufopUpdate { } {
+    global scanbuf scanbufop scanbufdisp
+
+#    puts -nonewline "Buffer operation: "
+#    puts $scanbufop(command)
+
+    set tokens [split $scanbufop(command) " "]
+    set nt [llength $tokens]
+#    puts -nonewline "Tokens: "
+#    puts $nt
+
+    for {set x 0} { $x < $nt } {set x [expr {$x + 1}]} {
+#	puts -nonewline "Token: "
+#	puts [ lindex $tokens $x ]
+    }
+    set command [ lindex $tokens 0 ]
+#    puts "Command: $command"
+    if {$command == "copy"} {
+	set source [ lindex $tokens 1 ]
+	set destination [ lindex $tokens 2 ]
+#	puts "Copy $source $destination"
+	
+	if { [ regexp -nocase -- {^(\d+)$} $source ] } {
+#	    puts "Good."	  
+	} else {
+#	    puts "Syntax error."
+	    set scanbufop(message) "Syntax error.  Use: copy 1 2-5."
+	    return -1	    
+	}
+
+	if { [ regexp -nocase -- {^(\d+)[-](\d+)$} $destination ] } {
+#	    puts "Range"
+	    set range [split $destination "-"]
+	    set first  [lindex $range 0]
+	    set second [lindex $range 1]
+#	    puts "Target $first $second"
+
+	    set targetlist $first
+	    for {set x [expr {1+$first}]} { $x < 1+$second } {set x [expr {$x + 1}]} {
+#		puts -nonewline "Element: "
+#		puts $x 
+		set targetlist [ concat $targetlist $x ]
+	    }
+	} elseif { [ regexp -nocase -- {^(\d+)$} $destination ] } {
+#	    puts "One destination."
+	    set targetlist $destination
+	} else {
+#	    puts "Syntax error."
+	    set scanbufop(message) "Syntax error.  Use: copy 1 2-5."
+	    return -1
+	}
+
+	set dn [llength $targetlist]
+	for {set x 0} { $x < $dn } {set x [expr {$x + 1}]} {
+	    set copyto [lindex $targetlist $x]
+#	    puts "Actual copy: $source $copyto"
+
+	    set a1 $scanbuf($source,comments)
+	    set     scanbuf($copyto,comments)    $a1
+	    set a1 $scanbuf($source,user)
+	    set     scanbuf($copyto,user)    $a1
+	    set a1 $scanbuf($source,ncycles)
+	    set     scanbuf($copyto,ncycles)    $a1
+	    set a1 $scanbuf($source,cyctime)
+	    set     scanbuf($copyto,cyctime)    $a1
+	    set a1 $scanbuf($source,holdtime)
+	    set     scanbuf($copyto,holdtime)    $a1
+	    set a1 $scanbuf($source,tempstart)
+	    set     scanbuf($copyto,tempstart)    $a1
+	    set a1 $scanbuf($source,tempinc)
+	    set     scanbuf($copyto,tempinc)    $a1
+	    set a1 $scanbuf($source,varytemp)
+	    set     scanbuf($copyto,varytemp)    $a1
+	    set a1 $scanbuf($source,readtemp)
+	    set     scanbuf($copyto,readtemp)    $a1
+
+	    set scanbufop(message) "Copy succesful."
+	}
+    } else {
+#	    puts "Syntax error."
+	    set scanbufop(message) "Syntax error.  Use: copy 1 2-5."
+	    return -1
+    }
+
+    if {1 == 1} { 
+	set recno $scanbufdisp(current)
+	foreach fld $scanbuf(flds) {
+	    set scanbufdisp($fld) $scanbuf($recno,$fld) 
+	}
+	ScanBufList
+
+	# update buffer information on disk
+	ScanBufWriteFile
+    }
+}
+proc HFBSBufopUpdate { } {
+    global hfbsbuf hfbsbufop hfbsbufdisp
+
+    set tokens [split $hfbsbufop(command) " "]
+    set nt [llength $tokens]
+
+    for {set x 0} { $x < $nt } {set x [expr {$x + 1}]} {
+    }
+    set command [ lindex $tokens 0 ]
+    if {$command == "copy"} {
+	set source [ lindex $tokens 1 ]
+	set destination [ lindex $tokens 2 ]
+
+
+	if { [ regexp -nocase -- {^(\d+)$} $source ] } {
+#	    puts "Good."	  
+	} else {
+#	    puts "Syntax error."
+	    set hfbsbufop(message) "Syntax error.  Use: copy 1 2-5."
+	    return -1	    
+	}
+
+	if { [ regexp -nocase -- {^(\d+)[-](\d+)$} $destination ] } {
+#	    puts "Range"
+	    set range [split $destination "-"]
+	    set first  [lindex $range 0]
+	    set second [lindex $range 1]
+
+	    set targetlist $first
+	    for {set x [expr {1+$first}]} { $x < 1+$second } {set x [expr {$x + 1}]} {
+		set targetlist [ concat $targetlist $x ]
+	    }
+	} elseif { [ regexp -nocase -- {^(\d+)$} $destination ] } {
+	    set targetlist $destination
+	} else {
+	    set hfbsbufop(message) "Syntax error.  Use: copy 1 2-5."
+	    return -1
+	}
+
+	set dn [llength $targetlist]
+	for {set x 0} { $x < $dn } {set x [expr {$x + 1}]} {
+	    set copyto [lindex $targetlist $x]
+
+	    set a1 $hfbsbuf($source,comments)
+	    set     hfbsbuf($copyto,comments)    $a1
+	    set a1 $hfbsbuf($source,user)
+	    set     hfbsbuf($copyto,user)    $a1
+	    set a1 $hfbsbuf($source,ncycles)
+	    set     hfbsbuf($copyto,ncycles)    $a1
+	    set a1 $hfbsbuf($source,cyctime)
+	    set     hfbsbuf($copyto,cyctime)    $a1
+	    set a1 $hfbsbuf($source,t0)
+	    set     hfbsbuf($copyto,t0)    $a1
+	    set a1 $hfbsbuf($source,readtemp)
+	    set     hfbsbuf($copyto,readtemp)    $a1
+	    set a1 $hfbsbuf($source,checktemp)
+	    set     hfbsbuf($copyto,checktemp)    $a1
+	    set a1 $hfbsbuf($source,checkdop)
+	    set     hfbsbuf($copyto,checkdop)    $a1
+	    set a1 $hfbsbuf($source,dt)
+	    set     hfbsbuf($copyto,dt)    $a1
+	    set a1 $hfbsbuf($source,mode)
+	    set     hfbsbuf($copyto,mode)    $a1
+
+	    set hfbsbufop(message) "Copy succesful."
+	}
+    } else {
+#	    puts "Syntax error."
+	    set hfbsbufop(message) "Syntax error.  Use: copy 1 2-5."
+	    return -1
+    }
+
+    if {1 == 1} { 
+	set recno $hfbsbufdisp(current)
+	foreach fld $hfbsbuf(flds) {
+	    set hfbsbufdisp($fld) $hfbsbuf($recno,$fld) 
+	}
+	HFBSBufList
+
+	# update buffer information on disk
+	HFBSBufWriteFile
+    }
+}
+
+
+proc ScanBufopCreate { parent } {
+    global scanbufop
+    
+    label $parent.scanbufopmsglab -text "Message:"
+    message $parent.scanbufopmsg -width 280 -textvariable scanbufop(message)
+    label $parent.scanbufopcomlab -text "Command:"
+    entry $parent.scanbufopcom -width 41 -textvariable scanbufop(command)
+    button $parent.scanbufopdo  -text "Accept"  -command ScanBufopUpdate
+
+    grid $parent.scanbufopmsglab -row 0 -column 0 -sticky w
+    grid $parent.scanbufopmsg -row 0 -column 1 -sticky w
+    grid $parent.scanbufopcomlab -row 1 -column 0 -sticky w
+    grid $parent.scanbufopcom -row 1 -column 1 -sticky w
+    grid $parent.scanbufopdo -row 1 -column 2 -sticky w
+
+    return $parent
+}
+proc HFBSBufopCreate { parent } {
+    global hfbsbufop
+    
+    label $parent.hfbsbufopmsglab -text "Message:"
+    message $parent.hfbsbufopmsg -width 280 -textvariable hfbsbufop(message)
+    label $parent.hfbsbufopcomlab -text "Command:"
+    entry $parent.hfbsbufopcom -width 41 -textvariable hfbsbufop(command)
+    button $parent.hfbsbufopdo  -text "Accept"  -command HFBSBufopUpdate
+
+    grid $parent.hfbsbufopmsglab -row 0 -column 0 -sticky w
+    grid $parent.hfbsbufopmsg -row 0 -column 1 -sticky w
+    grid $parent.hfbsbufopcomlab -row 1 -column 0 -sticky w
+    grid $parent.hfbsbufopcom -row 1 -column 1 -sticky w
+    grid $parent.hfbsbufopdo -row 1 -column 2 -sticky w
+
+    return $parent
+}
+# gaspar end
+
+
+proc ScanBufEntryCreate { parent } {
+    global scanbufdisp
+    
+    label $parent.bufnolabel -textvariable scanbufdisp(label)
+    label $parent.commentlabel -text "Comment:"
+    entry $parent.comment -width 40 -textvariable scanbufdisp(comments)
+    label $parent.userlabel -text "User:"
+    entry $parent.user -width 40 -textvariable scanbufdisp(user)
+    label $parent.ncyclabel -text "N pts:"
+    entry $parent.ncyc -width 10 -textvariable scanbufdisp(ncycles)
+    label $parent.cyctimelabel -text "Time/pt (sec):"
+    entry $parent.cyctime -width 10 -textvariable scanbufdisp(cyctime)
+    label $parent.model -text "Mode:"
+    tk_optionMenu $parent.mode scanbufdisp(mode) time temp
+    $parent.mode configure -width 6
+    label $parent.holdlabel -text "Hold/pt (sec):"
+    entry $parent.hold -width 10 -textvariable scanbufdisp(holdtime)
+    label $parent.t0label -text "T start (K):"
+    entry $parent.t0 -width 10 -textvariable scanbufdisp(tempstart)
+    label $parent.dtlabel -text "T increment:"
+    entry $parent.dt -width 10 -textvariable scanbufdisp(tempinc)
+    label $parent.options -text "Options:"
+    checkbutton $parent.optrt -text "Rec Temp" -variable scanbufdisp(readtemp)
+    button $parent.accept  -text "Accept"  -command ScanBufUpdate
+    button $parent.dismiss -text "Close" -command ScanBufEditHide
+
+
+    grid $parent.bufnolabel -row 0 -column 0
+    grid $parent.commentlabel -row 0 -column 1 -sticky w
+    grid $parent.comment -row 0 -column 2 -columnspan 4 -sticky ew
+    grid $parent.userlabel -row 1 -column 1 -sticky w
+    grid $parent.user -row 1 -column 2 -columnspan 3 -sticky ew
+    grid $parent.ncyclabel -row 2 -column 1 -sticky w
+    grid $parent.ncyc -row 2 -column 2 -sticky w
+    grid $parent.cyctimelabel -row 2 -column 3 -sticky w
+    grid $parent.cyctime -row 2 -column 4 -sticky e
+    grid $parent.model -row 3 -column 1 -sticky w
+    grid $parent.mode -row 3 -column 2 -sticky w
+    grid $parent.holdlabel -row 3 -column 3 -sticky w
+    grid $parent.hold -row 3 -column 4 -sticky e
+    grid $parent.t0label -row 4 -column 1 -sticky w
+    grid $parent.t0 -row 4 -column 2 -sticky w
+    grid $parent.dtlabel -row 4 -column 3 -sticky w
+    grid $parent.dt -row 4 -column 4 -sticky e
+    grid $parent.options -row 5 -column 1 -sticky w
+    grid $parent.optrt -row 5 -column 2 -sticky w
+    grid $parent.accept  -row 6 -column 0
+    grid $parent.dismiss -row 6 -column 4 
+
+    return $parent
+}
+
+proc ScanBufList { } { 
+    global scanbufdisp scanbuf
+    # Clear out our list if it contains anything.
+    set lbox $scanbufdisp(lbox)
+    $lbox delete 0 end
+    $lbox configure -font fixed
+    for {set i 0} {$i < $scanbuf(nbuf)} {incr i} {
+	$lbox insert end [ScanBufFormatRec $i]
+    }
+
+    bind $lbox <Double-ButtonPress-1> "ScanBufDisp \[$lbox curselection\]"
+    bind $lbox <Return> "ScanBufDisp \[$lbox curselection\]"
+}
+
+proc ScanBufDisp { recno } {
+    global scanbufdisp scanbuf
+    foreach fld $scanbuf(flds) {
+	set scanbufdisp($fld) $scanbuf($recno,$fld)
+    }
+    set num [format "%2d" $recno]
+    set scanbufdisp(label) "Buffer No: $num"
+    if {$scanbufdisp(varytemp)} {
+	set scanbufdisp(mode) temp
+    } else {
+	set scanbufdisp(mode) time
+    }
+    set scanbufdisp(current) $recno
+}
+
+proc ScanBufFormatRec { recno } {
+    global scanbuf
+    set output [format "%2d " $recno]
+    append output [binary format A20 $scanbuf($recno,comments)]
+    append output [format "%6d "     $scanbuf($recno,ncycles)]
+    append output [format "%6d "     $scanbuf($recno,cyctime)]
+    append output [format "%6.2f "   $scanbuf($recno,tempstart)]
+    append output [format "%6.2f "   $scanbuf($recno,tempinc)]
+    if {$scanbuf($recno,varytemp)} {
+	append output "temp"
+    } else {
+	append output "time"
+    }
+    return $output
+}
+
+proc ScanBufUpdate { } {
+    global scanbufdisp scanbuf
+    set recno $scanbufdisp(current)
+    switch $scanbufdisp(mode) {
+	time { set scanbufdisp(varytemp) 0 }
+	temp { set scanbufdisp(varytemp) 1 }
+    }
+    foreach fld $scanbuf(flds) {
+	set scanbuf($recno,$fld) $scanbufdisp($fld)
+    }
+    # update display on the list
+    set lbox $scanbufdisp(lbox)
+    $lbox delete $recno
+    $lbox insert $recno [ScanBufFormatRec $recno]
+    # update buffer information on disk
+    ScanBufWriteFile
+}
+
+proc ScanBufEditShow { } {
+    global scanbuf
+    if [winfo exists $scanbuf(toplevel)] {
+	wm deiconify $scanbuf(toplevel)
+    }
+}
+
+proc ScanBufEditHide { } {
+    global scanbuf
+    if [winfo exists $scanbuf(toplevel)] {
+	wm withdraw $scanbuf(toplevel)
+    }
+}
+
+proc ScanBufWriteFile { } {
+    global scanbuf env
+
+    set f [open $env(HOME)/hfbsscan.prm w]
+    for {set i 0} {$i < $scanbuf(nbuf)} {incr i} {
+	foreach fld $scanbuf(flds) {
+	    switch $fld {
+		comments {
+		    regsub -all {(["])} $scanbuf($i,$fld) "\\\"" comments
+		    set outline "set scanbuf($i,$fld) \"$comments\""
+		}
+		user {
+		    regsub -all {(["])} $scanbuf($i,$fld) "\\\"" user
+		    set outline "set scanbuf($i,$fld) \"$user\""
+		}
+		default {
+		    set outline "set scanbuf($i,$fld) $scanbuf($i,$fld)"
+		}
+	    }
+	    puts $f $outline
+	}
+    }
+    close $f
+}
+
+proc ScanBufReadFile { } {
+    global env
+    if {![file exists $env(HOME)/hfbsscan.prm]} {
+	return -code error "No parameter file"
+    }
+    uplevel #0 source $env(HOME)/hfbsscan.prm
+}
+
+proc ScanBufEditBuild { } {
+    global scanbuf scanbufdisp
+    set scanbuf(toplevel) [toplevel .scanprep ]
+    wm title .scanprep "Scan Setup"
+    wm withdraw .scanprep
+
+    ScrolledLabelledListbox .scanprep.l \
+	    "No Comment               Ncyc CycTim     T0     Dt Mode" \
+	    -height 5 -width 50
+    set scanbufdisp(lbox) .scanprep.l.list
+
+    notebook_create .scanprep.e
+    set page [notebook_page .scanprep.e hbuf ]
+    ScanBufEntryCreate $page
+    notebook_display .scanprep.e hbuf
+
+# gaspar begin
+    notebook_create .scanprep.b
+    set page2 [notebook_page .scanprep.b hbuf ]
+    ScanBufopCreate $page2
+    notebook_display .scanprep.b hbuf
+# gaspar end
+
+# gaspar begin
+    pack .scanprep.l -expand true -fill x -in .scanprep
+    pack .scanprep.e -side top    -fill x -in .scanprep 
+    pack .scanprep.b -side bottom -fill x    -in .scanprep 
+# gaspar end
+    wm protocol .scanprep WM_DELETE_WINDOW ScanBufEditHide
+    return .scanprep
+}
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+# Build GUI 
+# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#puts "Building GUI"
+set m [frame .mbar -relief raised -borderwidth 2]
+set f [frame .f -width 1024]
+set g [blt::graph .g]
+set t [label .t -height 6 -font fixed -relief sunken -justify left -anchor nw]
+set b [frame .buttons -relief raised -borderwidth 2]
+set bu [button $b.update -text "Update Plot" -command Refresh \
+	-relief raised -bd 4 -background orange -activebackground orange]
+set bn [frame $b.norm]
+
+set bnl [label $bn.label -text "Normalization:"]
+set bns [checkbutton $bn.sample -text "P(v)" -variable view(norm_smpl) \
+	-command ApplyNormSmpl ]
+set bnm [checkbutton $bn.monitor -text Monitor -variable view(norm_mon) \
+	-command ApplyNormMon ]
+set d [frame .dmask -relief raised -borderwidth 2]
+set dl [label .dmask.l -text "Detectors:"]
+pack $dl -in $d -side left
+for {set i 1} {$i < 17} {incr i} {
+    checkbutton $d.$i -text [format "%02d" $i] -variable view($i) 
+    .g element create e$i -xdata xs -ydata y$i -symbol none \
+	    -color [lindex $colors $i] -label $i -hide 1
+    trace variable view($i) w ViewSingle
+    pack $d.$i -in $d -side left
+}
+
+StatusPanelBuild .f
+
+.g element create e0 -xdata xs -ydata y -symbol none
+#.g configure -leftmargin 25m -rightmargin 10m -topmargin 10m -bottommargin 20m
+.g xaxis configure -title "PST Channel"
+.g yaxis configure -title "Intensity (Counts)"
+.g legend configure -hide 1
+.g postscript configure -landscape 1
+
+set mf [menubutton $m.file  -width 8 -text File     -underline 0 \
+	-menu $m.file.menu]
+set mp [menubutton $m.plot  -width 8 -text Plot     -underline 0 \
+	-menu $m.plot.menu]
+set ms [menubutton $m.setg  -width 8 -text Settings -underline 0 \
+	-menu $m.setg.menu]
+set mr [menubutton $m.run   -width 8 -text Run      -underline 0 \
+	-menu $m.run.menu]
+set mc [menubutton $m.scan  -width 8 -text Scan     -underline 1 \
+	-menu $m.scan.menu]
+set mq [menubutton $m.seq   -width 8 -text Sequence -underline 2 \
+	-menu $m.seq.menu]
+set mt [menubutton $m.temp  -width 8 -text Status   -underline 1 \
+	-menu $m.temp.menu]
+
+set mfm [menu $mf.menu]
+$mfm add command -label "Save Current" -underline 0 -command SaveData
+$mfm add command -label "Monitor"      -underline 1 -command MonitorStart
+$mfm add cascade -label "Updates"      -menu $mfm.update 
+$mfm add command -label "Print Setup"  -underline 1 -command PrintCmdShow
+$mfm add command -label "Print"        -underline 0 -command PrintGraph
+$mfm add separator
+$mfm add command -label "Exit"         -underline 1 -command exit
+
+set mfmu [menu $mfm.update]
+$mfmu add command -label "Automatic"   -command "set control(autoupdate) 1"
+$mfmu add command -label "Manual"      -command "set control(autoupdate) 0"
+
+set mpm [menu $mp.menu]
+$mpm add command -label "Monitor"      -command "ShowNewDet 0"
+$mpm add command -label "Detectors (sum)"    -command "ShowNewDet sum"
+$mpm add command -label "Detectors (single)" -command "ShowNewDet single"
+$mpm add command -label "P(v)"         -command "ShowNewDet samplemon"
+$mpm add separator
+$mpm add command -label "Table"        -command ShowSumTable
+$mpm add command -label "Scale Axes"   -command ShowScaleControl
+
+set msm [menu $ms.menu]
+$msm add command -label Temperature -command TempDialogShow
+$msm add command -label Doppler     -command DopplerDialogShow
+$msm add command -label PST         -command PSTDialogShow
+
+set mrm [menu $mr.menu]
+$mrm add command -label Setup       -command HFBSBufEditShow
+$mrm add separator
+$mrm add cascade -label Start       -menu    $mrm.start
+$mrm add command -label Stop        -command RunTruncate
+$mrm add separator
+$mrm add command -label Update      -command RunUpdate
+
+
+set mrms [menu $mrm.start]
+for {set i 0} {$i < $hfbsbuf(nbuf)} {incr i} {
+    $mrms add command -label "Buffer $i" -command "RunStart $i"
+}
+
+set mcm [menu $mc.menu]
+$mcm add command -label Setup       -command ScanBufEditShow
+$mcm add separator
+$mcm add cascade -label Start       -menu    $mcm.start
+$mcm add command -label Stop        -command ScanStop
+set mcms [menu $mcm.start]
+for {set i 0} {$i < $scanbuf(nbuf)} {incr i} {
+    $mcms add command -label "Buffer $i" -command "ScanStart $i"
+}
+
+set mqm [menu $mq.menu]
+$mqm add command -label Setup       -command SequenceEditorShow
+$mqm add separator
+$mqm add command -label Start       -command SequenceStart
+$mqm add command -label Stop        -command SequenceKill
+
+set mtm [menu $mt.menu]
+$mtm add command -label "General"     -underline 0 -command GetStatus
+$mtm add command -label "Temperature" -underline 0 -command TempRead
+
+wm title . "HFBS Control"
+pack $m -side top -fill x -anchor nw
+pack $t -side top -fill x -anchor nw
+pack $f -side top -fill both -anchor n
+pack $g -side top -expand true -fill both 
+pack $b -side top -fill x -anchor sw
+pack $d -side top -anchor sw -fill x
+pack $mf $mp $ms $mr $mc $mq $mt -side left -in $m
+pack $bu $bn -side left -in $b
+pack $bnl $bns $bnm -side left -in $bn
+
+# Center the parent window on the screen
+#
+wm geometry . "+0+0"
+
+###############################################################################
+# Last minute initializations, just to get the ball rolling
+#
+#puts "Last minute initializations"
+Blt_ZoomStack .g
+BuildSumTable
+#BuildMaskTable
+BuildScaleControl
+PSTDialogBuild
+DopplerDialogBuild
+TempDialogBuild
+#ScanDialogBuild .scan
+PrintCmdBuild
+if [file exists $env(HOME)/hfbsbuf.prm] {
+    source $env(HOME)/hfbsbuf.prm
+} else { HFBSBufWriteFile }
+if [file exists $env(HOME)/hfbsscan.prm] {
+    source $env(HOME)/hfbsscan.prm
+} else { ScanBufWriteFile }
+SequenceEditorBuild .sequence
+HFBSBufEditBuild
+HFBSBufList
+HFBSBufDisp 0
+ScanBufEditBuild
+ScanBufList
+ScanBufDisp 0
+Refresh
+
+catch {Launch Subscribe}
+trace variable control(autoupdate) w AutoUpdateChange
+
+
+#<<<<<<<<<<<<<<<<<<<<<<< Remove splash screen and show app screen
+update
+destroy .placard
+wm deiconify .
+wm protocol . WM_DELETE_WINDOW exit

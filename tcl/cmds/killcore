@@ -1,0 +1,44 @@
+#!/usr/bin/tclsh
+#
+# killcore - Stop core program
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: killcore,v 1.1.1.1 1999/09/20 14:32:09 nickm Exp $
+
+
+# Find the process ID of the core program
+if [catch {exec ps -ax | grep hfbscore | grep tclsh} result] {
+    puts stderr "The core program does not appear to be running"
+    exit
+}
+
+if {![regexp {^[ ]*([0-9]+)} $result match pid]} {
+    puts stderr "Could not determine process ID of core program."
+    exit
+}
+
+puts -nonewline " Are you sure you want to kill the core program \[Y/N\]: "
+flush stdout
+if {[gets stdin val] == 0} { exit }
+if [regexp {^Y} [string toupper $val] match] {
+    puts "Sending TERM signal to the core program. Please be patient."
+    if [catch {exec kill -s 15 $pid} result] {
+	puts "An error occurred while sending signal to process $pid:\n$result"
+    }
+    after 15000
+    # Determine whether the core program is still running
+    if [catch {exec ps -ax | grep hfbscore | grep tclsh} result] {
+	# Simply exit if we didn't find the core again.
+	exit
+    }
+
+    puts "Core program did not respond to TERM signal. Sending KILL signal."
+    if [catch {exec kill -s 9 $pid} result] {
+	puts "An error occurred while sending signal to process $pid"
+    }
+
+    exit
+}
+
+puts "No action taken."

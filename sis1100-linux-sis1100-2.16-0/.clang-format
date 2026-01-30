@@ -1,0 +1,10 @@
+﻿---
+BasedOnStyle: Microsoft
+Language: Cpp
+IndentCaseLabels: true
+BreakBeforeBraces: Stroustrup
+IndentWidth: '4'
+KeepEmptyLinesAtTheStartOfBlocks: false
+AlignConsecutiveMacros: true
+ColumnLimit: 120
+...

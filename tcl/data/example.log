@@ -1,0 +1,27 @@
+# 18-DEC-1996 11:47:22.68
+#  $disk2:[User.Cormon]DEC181996_01
+!18-DEC-1996 11:47:50   VG:18-DEC-1996 11:47:25    CH:18-DEC-1996 11:47:33
+!   WW:DD:HH:MM:SS      VG1      VG2      VG3      VG4   TEMP   MSPEED  df/dt
+0    0  0  0  0 26      0.0      0.0      0.0      0.0   21.3     3333  0.120
+!DISK DC PG SP MB SPEED RATIO AMPS  PHASE WIND  MAXD  MNDEV OUT DPHASE SCALR
+1  4B On On    On  1784   1/1 1.69   0.00 0.02  0.00  0.000   0         1799 C
+2  4A On On    On  1821   1/1 1.65   0.00 0.02  0.01  0.001   0         1785 C
+3  3A On On    On  1823   1/1 1.62   0.00 0.02  0.01  0.001   0         1782 C
+4  2B On On    On  1781   1/1 1.62   0.00 0.02  0.00  0.000   0         1785 C
+5  2A On On    On  1801   1/1 1.65   0.00 0.02  0.00  0.000   0         1789 C
+6  1B On    On        0   0/1 0.02   0.00 0.02 *****  0.000   0            0 0
+7  1A On    On        0   0/1 0.05   0.00 0.02 90.82  0.000   0            0 0
+      CPU err # CPU errsCommand Wor  Stat_Word   Watchdog MasterStat
+4        2048          1         16          1          1          0
+6        2048          7         16         27          5          0
+1234567890123456789012345678901234567890123456789012345678901234567890123456789
+
+#
+# 
+#
+!18-DEC-1996 11:47:50   PLC:18-DEC-1996 11:47:25    
+! WW:DD:HH:MM:SS  DOPPLER: EN OP DP OT IF VF PST: EN DF BD CV 
+0  0  0  0  0 26           Y  Y  Y  Y  Y  Y       Y  Y  Y  Y
+!DOPSPD   P_IN  P_OUT   T_IN  T_OUT  T_BSH  DFLOW PSTSPD   T_WIN  PFLOW  HRATE
+ 0000.0 0000.0 0000.0 0000.0 0000.0 0000.0 0000.0 0000.0  0000.0 0000.0 0000.0
+ 

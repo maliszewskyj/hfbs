@@ -1,0 +1,74 @@
+Analog Devices ADSP-210x0 Linker             timbin.map               Page 1
+Release 3.3, Version 2.21                    Thu Aug 21 14:31:09 2003
+Copyright (c) 1991-1996 Analog Devices, Inc.
+ 
+ 
+Architecture Description: ADSP21061_PROM_Boot_Loader_Architecture
+ 
+Segment     Start     End       Length      Memory Type          Attribute    Width
+ 
+seg_irqv    020000    0200ff    256         Program Memory       RAM
+seg_pm1     020100    021fff    7936        Program Memory       RAM
+seg_dm1     00023000  00023fff  4096        Data Memory          RAM
+seg_pm2     024000    025fff    8192        Program Memory       RAM
+seg_dm2     00027000  00027fff  4096        Data Memory          RAM
+ 
+ 
+Memory Usage (Actual):
+ 
+Segment     Start     End       Length      Memory Type          Attribute
+ 
+seg_irqv    ******    ******    0           Program Memory       RAM
+seg_pm1     020100    0201d8    217         Program Memory       RAM
+seg_pm2     024000    024009    10          Program Memory       RAM
+seg_dm1     00023000  00023002  3           Data Memory          RAM
+seg_dm2     ********  ********  0           Data Memory          RAM
+ 
+ 
+Memory Usage Summaries:
+ 
+Memory Type     Attribute  Total
+ 
+Program Memory  ROM        0
+Program Memory  RAM        227
+Program Memory  PORT       0
+Data Memory     ROM        0
+Data Memory     RAM        3
+Data Memory     PORT       0
+ 
+ 
+Cross Reference for file -> timbin.obj:
+ 
+Symbol                             Type  Address   Class
+ 
+D5H                                DM    00023001  static
+HIGHIST                            PM      0201ad  static
+INT0ST                             DM    00023000  static
+IRQSETUP                           PM      020103  static
+Irq_Service_IRQ1                   PM      0201d3  static
+LOOP_START                         PM      020118  static
+LOWHIST                            PM      02019f  static
+MCMDLATCH                          PM      02017e  static
+MONHIST                            PM      020191  static
+Mirrow_IRQ1_Vector                 PM      020101  static
+NOHIGHIST                          PM      0201aa  static
+NOLOWHIST                          PM      02019c  static
+NOMONHIST                          PM      02018f  static
+NOUPDATE                           PM      02017e  static
+PRELOOP                            PM      02015b  static
+SAVER6                             DM    00023002  static
+Start                              PM      020100  static
+TIMERCEILING                       PM      0201bb  static
+TIMEREND                           PM      0201c1  static
+TIMERZERO                          PM      0201bd  static
+WORKLOOP                           PM      02016a  static
+WORKLOOP1                          PM      020153  static
+WORKLOOP2                          PM      020157  static
+Analog Devices ADSP-210x0 Linker             timbin.map               Page 2
+Release 3.3, Version 2.21                    Thu Aug 21 14:31:09 2003
+Copyright (c) 1991-1996 Analog Devices, Inc.
+ 
+ 
+Wait_On_VME_Busy                   PM      024000  static
+ 
+ 

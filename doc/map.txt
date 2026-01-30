@@ -1,0 +1,29 @@
+Variable and memory location on DSP      Address on Heurikon
+VRESULT      EQU  B_RAM+$800             0f002000
+FLAGIRQB     EQU  B_RAM+$801             0f002004
+NOFIRQ       EQU  B_RAM+$802             0f002008
+IRQSTAT      EQU  B_RAM+$803             0f00200C
+ASEQSTAT     EQU  B_RAM+$804             0f002010
+VADM1        EQU  B_RAM+$810             0f002040
+VADM2        EQU  B_RAM+$811             0f002044
+LATCHBIN     EQU  B_RAM+$812             0f002048
+ELOOK        EQU  B_RAM+$813             0f00204C
+SCALVAL      EQU  B_RAM+$814             0f002050
+WRITEBAS     EQU  B_RAM+$815             0f002054
+PTROFF1      EQU  B_RAM+$820             0f002080
+PTROFF2      EQU  B_RAM+$821             0f002084 
+PTROFF3      EQU  B_RAM+$822             0f002088 
+
+RING_BUFF_D  EQU  B_RAM+$1000	         0f004000
+ADC_POS_LOOK EQU  B_RAM+$2000            0f008000
+ADC_NEG_LOOK EQU  B_RAM+$3000            0f00c000
+LATCH_LOOK   EQU  B_RAM+$4000            0f010000
+RING_BUFF_M  EQU  B_RAM+$5000            0f014000
+VADC_LOOK    EQU  B_RAM+$6000            0f018000
+
+MON_H_BASE   EQU  $20000                 0f100000
+LOW_H_BASE   EQU  $21000                 0f104000
+HIG_H_BASE   EQU  $23800                 0f10E000
+
+PTR_LOOK1    EQU  $30000                 0f400000
+PTR_LOOK2    EQU  $40000                 0f800000

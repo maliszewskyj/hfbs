@@ -1,0 +1,21 @@
+#!/usr/bin/tclsh
+#
+# startcore - Start core program
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: startcore,v 1.1.1.1 1999/09/20 14:32:09 nickm Exp $
+
+set executable "/home/nickm/source/hfbscore/hfbscore"
+set command "$executable >& /tmp/hfbscore.out &"
+
+# Find the process ID of the core program
+if {![catch {exec ps -ax | grep hfbscore | grep tclsh} result]} {
+    puts stderr "The core program seems to be running already"
+    exit
+}
+
+if [catch {exec $executable >& /tmp/hfbscore.out &} result] {
+    puts stderr $result
+}
+

@@ -1,0 +1,29 @@
+#!/usr/bin/perl
+#
+# Generate ADC lookup table for ICS ADCs
+#          ICS ADCs generate data in 1's complement mode.
+#
+
+$opt_b = 0;
+$debug = 0;
+$fixadc = 0;
+$offset = 5; # Correct for slight offset in voltage read using ICS ADC
+for($i=0;$i< 2048;$i++) {
+    if ($i & 0x400) {
+	$val = - ( ~$i & 0x7ff );
+	$val -= 1;
+    } else {
+	$val = $i;
+    }
+    $val += $offset;
+    $val += 0x400;
+    if ($val > 2047) { $val = 2047; }
+    if ($val < 0)    { $val = 0; }
+    if ($opt_b) {
+	$binval = pack "N",$val;
+	print $binval;
+    } else {
+	if ($debug) { printf "%4d ",$i; }
+	printf "%d\n",$val;
+    }
+}

@@ -1,0 +1,20 @@
+#!/usr/bin/tclsh
+#
+# findcore - Get process ID of core program
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: findcore,v 1.1.1.1 1999/09/20 14:32:09 nickm Exp $
+
+# Find the process ID of the core program
+if [catch {exec ps -ax | grep hfbscore | grep tclsh} result] {
+    puts stderr "The core program does not appear to be running"
+    exit
+}
+
+if {![regexp {^[ ]*([0-9]+)} $result match pid]} {
+    puts stderr "Could not determine process ID of core program."
+    exit
+}
+
+puts "Core program is alive: PID=$pid"

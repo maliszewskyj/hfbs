@@ -1,0 +1,1150 @@
+#!/usr/bin/wish
+#
+# bsview - Tool to examine HFBS data files
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: bsmulti,v 1.1.1.1 1999/09/20 14:32:09 nickm Exp $
+
+# load shared libraries & packages
+package require BLT
+# fix BLT package screwup
+source /usr/lib/blt2.4/bltGraph.tcl
+package require narray
+foreach lib { libaryimg.so } {
+    if [catch {load $lib} result] {
+	puts stderr "Can't load shared library: $lib"
+	exit
+    }
+}
+
+# Global array for managing multiple run buffers
+#
+set buffer(nbuf)         5
+set buffer(nactive)      0
+set buffer(current_mode) null
+set buffer(colors)       {black red blue green purple}
+for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+    narray create total$i    1 1
+    narray create data$i     1 1
+    narray create norm$i     1 1
+    blt::vector   y${i}(4096)
+    blt::vector   ydet${i}(20)
+    set buffer($i,total)     total$i
+    set buffer($i,data)      data$i
+    set buffer($i,norm)      norm$i
+    set buffer($i,y)         y$i
+    set buffer($i,ydet)      ydet$i
+    set buffer($i,monitor)   0.0
+    set buffer($i,tottime)   0.0
+    set buffer($i,filename)  -empty-
+    set buffer($i,comments)  ""
+    set buffer($i,starttime) ""
+    set buffer($i,mode)      ""
+    set buffer($i,active)    0
+    set buffer($i,show)      0
+    set buffer($i,showwid)   .nothing
+}
+
+narray create fullsize     23 4096
+narray create work2        1 1
+narray create hvec      4096
+narray create hsum         1
+narray create ordinal   4096
+narray create energy    2048
+# calculate energies associated with each velocity channel
+energy vset k1 5.22707e-3
+energy vset k2 1261.64
+energy vset v 0.0
+energy map {
+    v = (@0 - 1024.0)/102.4;
+    [] = $k1 * ($v * $v + $k2 * $v);
+}
+ordinal map {[] = @0;}
+set knownmodes {standard teach}
+array set chans { teach 4096 standard 2048 hybrid 2048 }
+array set dets  { teach   20 standard   23 hybrid   23 }
+blt::vector xs(4096)
+blt::vector x_e(2048)
+narray2vec ordinal x xs
+set mode teach
+
+blt::vector xdet(20)
+for {set i 0} {$i < 20} {incr i} {    set xdet($i) $i }
+
+# Global variables
+set detlabel "Det:  0"
+set veclen         4096
+set filename "hfbs.dat"
+set printcmd "/usr/bin/lpr"
+set lprcmd   $printcmd
+
+# preferences
+set view(integrate)      0 
+set view(norm_smpl)      0
+set view(norm_mon)       0
+set view(currentdet)     sum
+set view(integrate_done) 0
+set view(norm_smpl_done) 0
+set view(norm_mon_done)  0
+set view(xauto)          1
+set view(xmin)           0
+set view(xmax)           1
+set view(yauto)          1
+set view(ymin)           0
+set view(ymax)           1
+# Set up detector channel integration mask
+set view(0)              0
+for {set i  1} {$i < 17} {incr i} {set view($i) 1}
+for {set i 17} {$i < 20} {incr i} {set view($i) 0}
+
+# Bitmap images for GUI
+image create bitmap skull -data "
+#define skull_width 12
+#define skull_height 12
+static unsigned char skull_bits[] = {
+   0xf8, 0x03, 0xe4, 0x04, 0xe4, 0x04, 0xbc, 0x07, 0xb0, 0x01, 0x13, 0x09,
+   0xf7, 0x0d, 0x1c, 0x0f, 0xf0, 0x01, 0xe0, 0x00, 0x1d, 0x0b, 0x07, 0x0e};
+"
+
+###############################################################################
+# Procedures 
+#
+
+proc ReadHFBS { bufno filename } {
+    global buffer fullsize
+
+    if {$bufno >= $buffer(nbuf)} {
+	return -code error "Invalid buffer number"
+    }
+
+    # Reset buffer variables
+    set buffer($bufno,filename)  -empty-
+    set buffer($bufno,tottime)   0.0
+    set buffer($bufno,starttime) "01-Jan-1970 00:00:00"
+    set buffer($bufno,mode)      teach
+    set buffer($bufno,comments)  ""
+
+    if [catch {open $filename r} infile] {
+	return -code error $infile
+    }
+    if [regexp {/([^/]+)$} $filename match bfile] {
+	set buffer($bufno,filename) $bfile
+    } else {
+	set buffer($bufno,filename) $filename
+    }
+    set curdet 0
+    while {[gets $infile line] >= 0} {
+	if [regexp {^#} $line] {
+	    if [regexp {^#Live([^:]*):(.*)} $line match spaces livetime] {
+		set livetime [expr 1.0 * $livetime]
+		set buffer($bufno,tottime) $livetime
+	    }
+	    if [regexp {^#Start([^:]*):(.*)} $line match spaces starttime] {
+		set buffer($bufno,starttime) $starttime
+	    }
+	    if [regexp {^#Comments([^:]*):(.*)} $line match spaces comments] {
+		set buffer($bufno,comments) $comments
+	    }
+	    if [regexp {^#Run Mode([^:]*):(.*)} $line match spaces vmemode] {
+		set mode [string trimleft [string trimright $vmemode]]
+		if {![string compare $buffer(current_mode) null]} {
+		    set buffer(current_mode) $mode
+		} else {
+		    if [string compare $buffer(current_mode) $mode] {
+			set buffer($bufno,comments) ""
+			set buffer($bufno,tottime)  0.0
+			set buffer($bufno,starttime) "01-Jan-1970 00:00:00"
+			set buffer($bufno,filename)  -empty-
+			return -code error \
+			    "ERR:\nBuffer is not in $buffer(current_mode) mode"
+		    }
+		}
+		set buffer($bufno,mode) $mode
+		switch $mode {
+		    standard {
+			fullsize export {0 0} {23 2048} $buffer($bufno,total)
+		    }
+		    teach {
+			fullsize export {0 0} {20 4096} $buffer($bufno,total)
+		    }
+		    hybrid {
+			fullsize export {0 0} {23 2048} $buffer($bufno,total)
+		    }
+		    default {
+			close $infile
+			return "ERR:\nUnrecognized mode"
+		    }
+		}
+	    }
+	    if [regexp {^# Detector(.*)} $line match det] {
+		set curdet [expr 1 * $det]
+	    }
+	} else {
+	    if {[scan $line "%d %f" chan val] == 2} {
+		$buffer($bufno,total) aset $curdet $chan $val
+	    }
+	}
+    }
+    close $infile
+    return $filename
+}
+
+proc OpenData { bufno {infile {}} } {
+    global buffer chans dets view knownmodes
+
+    if {$bufno > $buffer(nbuf)} {
+	PutText "ERR:\nBuffer number $bufno out of range"
+	return
+    }
+
+    set types {
+	{{HFBS Files}       {.hfbs}        HFBS} 
+	{{All Files}        *             }
+    }
+
+    if {[string length $infile] == 0} {
+	set filename [tk_getOpenFile -initialdir /home/hfbs/data \
+		-filetypes $types]
+    } else {
+	set filename $infile
+    }
+    if {[string length $filename] == 0} { return } 
+    PutText "Reading data: please wait"
+    BusyCursorOn
+    update
+    if [catch {ReadHFBS $bufno $filename} result] {
+	PutText $result
+	return
+    }
+    PutText ""
+    BusyCursorOff
+    update
+    
+    set veclen $chans($buffer($bufno,mode))
+
+    set view(integrate_done) 0
+    set view(norm_smpl_done) 0
+    set view(norm_mon_done)  0
+    Integrate $bufno
+    SplitMats $bufno
+
+    #Make a pretty picture to display
+    #set sub [expr $chans($mode) / 1024]
+    #data export { 1 0} [list 16 $chans($mode)] work2
+    #work2 map {[] = log($[] + 1); }
+    #img configure -data work2
+    #imgy copy img -zoom 1 6
+    #imgz copy imgy -subsample [expr $chans($mode) / 1024] 1
+
+    set buffer($bufno,active) 1
+    incr buffer(nactive)
+
+    # Apply view options
+
+    if {$view(norm_smpl)} { NormalizeSample  $bufno}
+    if {$view(norm_mon) } { NormalizeMonitor $bufno}
+    .g element configure e$bufno -label $buffer($bufno,filename)
+    BufferShow $bufno
+    #.g element configure e$bufno -hide 0 -label $buffer($bufno,filename)
+    ShowNewDet $view(currentdet) 
+
+    return 0
+}
+
+proc Integrate { bufno } {
+    global xdet chans livetime view buffer
+
+    PutText "Integrating over velocity/PST channels."
+    global $buffer($bufno,ydet)
+    BusyCursorOn
+    update
+    $buffer($bufno,total) collapse {0 1} hvec
+    hvec export 0 20 hsum
+    narray2vec hsum x $buffer($bufno,ydet)
+    #.sum.l configure -text [ListSum]
+    # Kludge for high counts in monitor and unconnected channels
+    set buffer($bufno,monitor) [set "$buffer($bufno,ydet)(0)"]
+    set "$buffer($bufno,ydet)(0)" 0
+    set "$buffer($bufno,ydet)(19)" 0
+    PutText ""
+    BusyCursorOff
+    update
+    set view(integrate_done) 1
+    return $view(integrate_done)
+}
+
+#
+# Split block of data received from VME system into portions suitable for
+# writing to a file.
+#
+proc SplitMats { {bufno 0} } {
+    global logs work2 dets chans view buffer
+
+    PutText "Processing raw data for buffer $bufno"
+    BusyCursorOn
+    update
+    $buffer($bufno,total) export {0 0} [list 20 $chans($buffer($bufno,mode))] \
+	    $buffer($bufno,data)
+    $buffer($bufno,total) export {0 0} [list 20 $chans($buffer($bufno,mode))] \
+	    $buffer($bufno,norm)
+    switch $buffer($bufno,mode) {
+	teach {
+	    # Build normalization histogram
+	    $buffer($bufno,total) export {19 0} {1 4096} work2
+	    for {set i 0} {$i < 20} {incr i} {
+		$buffer($bufno,norm) import [list $i 0] work2
+	    }
+	    work2 map {[] = 0;}
+	    $buffer($bufno,data) import {19 0} work2
+	}
+	standard {
+	    # Build monitor sample histogram
+	    $buffer($bufno,total) export {20 0} {1 2048} work2
+	    $buffer($bufno,norm) import {0 0} work2
+	    # Build low angle detector sample histogram
+	    $buffer($bufno,total) export {21 0} {1 2048} work2
+	    for {set i 1} {$i < 5} {incr i} {
+		$buffer($bufno,norm) import [list $i 0] work2
+	    }
+	    # Build high angle detector sample histogram
+	    $buffer($bufno,total) export {22 0} {1 2048} work2
+	    for {set i 5} {$i < 20} {incr i} {
+		$buffer($bufno,norm) import [list $i 0] work2
+	    }
+	}
+	hybrid {
+	    # Build monitor sample histogram
+	    $buffer($bufno,total) export {20 0} {1 2048} work2
+	    $buffer($bufno,norm) import {0 0} work2
+	    # Build low angle detector sample histogram
+	    $buffer($bufno,total) export {21 0} {1 2048} work2
+	    for {set i 1} {$i < 5} {incr i} {
+		$buffer($bufno,norm) import [list $i 0] work2
+	    }
+	    # Build high angle detector sample histogram
+	    $buffer($bufno,total) export {22 0} {1 2048} work2
+	    for {set i 5} {$i < 20} {incr i} {
+		$buffer($bufno,norm) import [list $i 0] work2
+	    }
+	}
+	default {
+	    BusyCursorOff
+	    return -code error "Available modes : standard teach hybrid"
+	}
+    }
+    PutText ""
+    BusyCursorOff
+    update
+    return 0
+}
+
+proc BusyCursorOn {} {
+    . configure -cursor watch
+    .g configure -cursor watch
+}
+
+proc BusyCursorOff {} {
+    . configure -cursor {}
+    .g configure -cursor crosshair
+}
+
+#
+# Normalize data to sample histograms
+#
+proc NormalizeSample { {bufno 0} } {
+    global xdet view buffer
+
+    PutText "Normalizing buffer $bufno to sample histograms."
+    BusyCursorOn
+    update
+    # Multiply []/$normalize[] by 50000 to get rate in C/s
+    # Multiply []/$normalize[] by 50000/60=833.33 to get rate in C/min
+    $buffer($bufno,data) map {
+	$normalize[] < 0.000000001 ? [] = 0 : [] = $[] * 833.33 / $normalize[];
+    } [list normalize $buffer($bufno,norm)]
+
+    PutText ""
+    BusyCursorOff
+    update
+    set view(norm_smpl_done) 1
+    return $view(norm_smpl_done)
+}
+
+#
+# Normalize data to monitor
+#
+proc NormalizeMonitor {{bufno 0} } {
+    global chans view buffer
+
+    # if {!$view(norm_smpl_done)} { NormalizeSample }
+    PutText "Normalizing buffer $bufno to monitor."
+    BusyCursorOn
+    update
+    # Fill narray normalize with values from monitor channel
+    $buffer($bufno,data) export {0 0} \
+	    [list 1 $chans($buffer($bufno,mode))] work2
+    for {set i 0} {$i < 20} {incr i} {
+	$buffer($bufno,norm) import [list $i 0] work2
+    }
+
+    $buffer($bufno,data) map { 
+	$normalize[] < 0.000001 ? divisor = 1 : divisor = $normalize[]; 
+	[] /= $divisor; 
+    } [list normalize $buffer($bufno,norm)]
+
+    PutText ""
+    BusyCursorOff
+    update
+    set view(norm_mon_done) 1
+    return $view(norm_mon_done)
+}
+
+# Print a list of sums over all velocity/PST channels
+#
+#
+proc BuildSumTable { } {
+    toplevel .sum
+    wm withdraw .sum
+    label .sum.l -width 30 -height 21 -font fixed -justify left -anchor nw
+    frame .sum.b
+    button .sum.b.dismiss -text "Dismiss" -command HideSumTable
+    button .sum.b.print -text "Print" -command PrintSum
+    pack .sum.l .sum.b -side top -expand true -fill x
+    pack .sum.b.dismiss .sum.b.print -in .sum.b -side left -fill x -expand true
+}
+
+proc HideSumTable {} {
+    wm withdraw .sum
+}
+
+proc ShowSumTable { bufno } {
+
+    if [catch {ListSum $bufno} result] {
+	PutText $result
+	return
+    }
+    .sum.l configure -text $result
+    wm deiconify .sum
+}
+
+proc PrintSum {} {
+    global lprcmd
+    set output [lindex [.sum.l configure -text] end]
+    if [catch { exec echo $output | lpr } result] {
+	PutText $result
+    }
+}
+
+proc ListSum { {bufno 0} } {
+    global xdet mode dets chans view buffer
+
+    if {!$buffer($bufno,active)} {
+	return -code error "ERR:\nBuffer $bufno has no data!"
+    }
+    global $buffer($bufno,ydet)
+    set output "$buffer($bufno,filename)\n"
+    if {$buffer($bufno,tottime) > 1.0} {
+	set ltime [expr $buffer($bufno,tottime) / 60.0]
+    } else {
+	set ltime 1.0
+    }
+    set monitor $buffer($bufno,monitor)
+    if {$monitor <= 0.0} {
+	set monitor 1.0
+    } 
+    append output "Live Time(min):    "
+    append output [format "%10.2f\n" [expr $buffer($bufno,tottime) / 60.0]]
+    append output "Monitor       :  "
+    append output [format "%12.0f\n" $monitor]
+    append output "Det   Counts(raw) Rate(c/mon)\n"
+    for {set i 1} {$i < 17} {incr i} {
+	append output [format " %2.0f"  $xdet($i)]
+	append output [format " %12.0f" [set "$buffer($bufno,ydet)($i)"]]
+	append output [format " %9.4fE-4" \
+		[expr ([set "$buffer($bufno,ydet)($i)"] * 10000.0)/ $monitor]]
+	append output "\n"
+    }
+    set trate 0.0
+    for {set i 5} {$i < 17} {incr i} { set trate [expr $trate + \
+	    [set "$buffer($bufno,ydet)($i)"]]}
+    append output "Rate (5-16):     "
+    append output [format "%9.4fE-4" [expr ($trate*10000.0) / $monitor]]
+    return $output
+}
+
+proc DisableMaskEntry { } {
+    for {set i 1} {$i < 17} {incr i} {
+	.dmask.$i configure -state disabled
+    }
+}
+
+proc EnableMaskEntry { } {
+    for {set i 1} {$i < 17} {incr i} {
+	.dmask.$i configure -state normal
+    }
+}
+
+proc BuildMaskTable { } {
+    global view
+    toplevel .mask
+    wm withdraw .mask
+    frame .mask.f
+    label .mask.f.label -text "Detector Mask"
+    pack .mask.f.label -in .mask.f -side top
+    for {set i 1} {$i < 20} {incr i} {
+	checkbutton .mask.f.det$i -text Det[format "%02d" $i] \
+		-variable view($i) -command "ShowNewDet sum"
+	pack .mask.f.det$i -in .mask.f -side top
+    }
+    button .mask.dismiss -text "Dismiss" -command HideMaskTable
+    pack .mask.f .mask.dismiss -side top -expand true -fill x
+}
+
+
+# Loop over all active buffers in doing this
+proc ApplyNormMon { args } {
+    global view buffer
+
+    if {$view(norm_mon)} {
+	if {!$view(norm_mon_done)} { 
+	    for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+		if {$buffer($i,active)} {
+		    NormalizeMonitor $i
+		}
+	    }
+	    ShowNewDet $view(currentdet)
+	}
+    } else {
+	if {$view(norm_mon_done)} {
+	    set view(norm_mon_done) 0
+	    for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+		if {$buffer($i,active)} {
+		    SplitMats $i
+		    if {$view(norm_smpl)} {NormalizeSample $i}
+		}
+	    }
+	    ShowNewDet $view(currentdet)
+	}
+    }
+}
+
+# Loop over all active buffers in doing this
+proc ApplyNormSmpl { args } {
+    global view buffer 
+
+    if {$view(norm_smpl)} {
+	if {!$view(norm_smpl_done)} { 
+	    for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+		if {$buffer($i,active)} {
+		    NormalizeSample $i
+		}
+	    }	    
+	    ShowNewDet $view(currentdet)
+	}
+    } else {
+	if {$view(norm_smpl_done)} {
+	    set view(norm_smpl_done) 0
+	    for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+		if {$buffer($i,active)} {
+		    SplitMats $i
+		}
+	    }
+	    ShowNewDet $view(currentdet)
+	}
+    }
+}
+
+proc SaveData { {bufno 0} } {
+    global buffer xs chans
+
+    set filename [tk_getSaveFile -initialdir [pwd]]
+    if {[string length $filename] == 0} { return } 
+    update
+
+    if [catch {open $filename w} outfile] {
+	PutText "Could not open $filename for writing."
+	return
+    }
+
+    set veclen $chans($buffer($bufno,mode))
+    if { $veclen == 20 } {
+	set yvec $buffer($bufno,ydet)
+    } else {
+	set yvec $buffer($bufno,y)
+    }
+    for {set i 0} { $i < $veclen } { incr i } {
+	# Write x coordinate as a function of microseconds
+	set xval $xs($i)
+	if {![catch {$yvec range $i $i} yval]} {
+	    puts $outfile "$xval $yval"
+	}
+    }
+    close $outfile
+}
+
+proc ApplyScale { } {
+    global view
+
+    # xaxis
+    if {$view(xauto)} {
+	.g xaxis configure -min {} -max {}
+    } else {
+	# Check to make sure limits are real numbers
+	if [catch {expr 1.0 * $view(xmin)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(xmin)\"" \
+		error 0 OK
+	    return
+	}
+	if [catch {expr 1.0 * $view(xmax)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(xmax)\"" \
+		error 0 OK
+	    return
+	}
+	.g xaxis configure -min $view(xmin) -max $view(xmax)
+    }
+    
+    # yaxis
+    if {$view(yauto)} {
+	.g yaxis configure -min {} -max {}
+    } else {
+	# Check to make sure limits are real numbers
+	if [catch {expr 1.0 * $view(ymin)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(ymin)\"" \
+		error 0 OK
+	    return
+	}
+	if [catch {expr 1.0 * $view(ymax)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(ymax)\"" \
+		error 0 OK
+	    return
+	}
+	.g yaxis configure -min $view(ymin) -max $view(ymax)
+    }
+}
+
+proc BuildScaleControl { } {
+    global view    
+    toplevel .scale
+    wm withdraw .scale
+
+
+    label .scale.xaxis -text "X axis"
+    radiobutton .scale.xauto -text "Autoscale" \
+	    -variable view(xauto) -value 1 
+    radiobutton .scale.xman  -text "Manual"    \
+	    -variable view(xauto) -value 0 
+    label .scale.xminl -text "Minimum" 
+    label .scale.xmaxl -text "Maximum" 
+    entry .scale.xmine -textvariable view(xmin) -width 10
+    entry .scale.xmaxe -textvariable view(xmax) -width 10
+
+    label .scale.yaxis -text "Y axis"
+    radiobutton .scale.yauto -text "Autoscale" \
+	    -variable view(yauto) -value 1 
+    radiobutton .scale.yman  -text "Manual"    \
+	    -variable view(yauto) -value 0 
+    label .scale.yminl -text "Minimum" 
+    label .scale.ymaxl -text "Maximum" 
+    entry .scale.ymine -textvariable view(ymin) -width 10
+    entry .scale.ymaxe -textvariable view(ymax) -width 10
+    button .scale.dismiss -text "Dismiss" -command HideScaleControl
+    button .scale.apply   -text "Apply"   -command ApplyScale
+
+    grid .scale.xaxis .scale.xauto .scale.xman  -in .scale
+    grid x            .scale.xminl .scale.xmine -in .scale
+    grid x            .scale.xmaxl .scale.xmaxe -in .scale
+
+    grid .scale.yaxis .scale.yauto .scale.yman  -in .scale
+    grid x            .scale.yminl .scale.ymine -in .scale
+    grid x            .scale.ymaxl .scale.ymaxe -in .scale
+    grid .scale.dismiss     x      .scale.apply -in .scale
+    return .scale
+}
+
+proc HideScaleControl { } {
+    wm withdraw .scale
+}
+
+proc ShowScaleControl { } {
+    wm deiconify .scale
+}
+
+proc PrintCmdAccept { } {
+    global printcmd lprcmd
+    set lprcmd $printcmd
+}
+
+proc PrintCmdSetup { } {
+    global printcmd lprcmd
+
+    toplevel .print
+    label .print.l -text "Enter Print Command: "
+    entry .print.e -textvariable printcmd
+    button .print.dismiss -text "Dismiss" -command "destroy .print"
+    button .print.accept  -text "Accept"  -command "PrintCmdAccept"
+    grid .print.l       .print.e      -in .print
+    grid .print.dismiss .print.accept -in .print
+}
+
+proc PrintGraph { } {
+    global .g lprcmd buffer view
+    set bufno 0
+    set outfile "/tmp/hfbs[pid].ps"
+    if [catch {.g postscript output $outfile}] {
+	PutText "Cannot create postscript output"
+	return
+    }
+
+    set detstring ""
+    switch $view(currentdet) {
+	all { set detstring all }
+	0 { set detstring monitor }
+	sum {
+	    for {set i 0} {$i < 17} {incr i} {
+		if {[string length $detstring] > 0} {
+		    append detstring ","
+		}
+		if { $view($i) } { append detstring $i }
+	    }
+	}
+    }
+
+    # Prepend buffer information to hardcopy
+    set finalfile "/tmp/hfbs[pid]x.ps"
+
+    set f [open $finalfile w]
+    puts $f "%!PS"
+    puts $f "gsave"
+    puts $f "/Times-Roman findfont 8 scalefont setfont"
+    puts $f "792 0 translate 90 rotate"
+    set timestring [format "%.2f " $buffer(0,tottime)]
+    puts $f " 72 729 moveto (Buffer 0:) show"
+    puts $f "144 729 moveto ($buffer(0,filename)) show"
+    puts $f "288 729 moveto ($buffer(0,starttime)) show"
+    puts $f "396 729 moveto ($buffer(0,mode)) show"
+    puts $f "432 729 moveto ($timestring sec) show"
+    puts $f "144 720 moveto ($buffer(0,comments)) show"
+    set timestring [format "%.2f " $buffer(1,tottime)]
+    puts $f " 72 711 moveto (Buffer 1:) show"
+    puts $f "144 711 moveto ($buffer(1,filename)) show"
+    puts $f "288 711 moveto ($buffer(1,starttime)) show"
+    puts $f "396 711 moveto ($buffer(1,mode)) show"
+    puts $f "432 711 moveto ($timestring sec) show"
+    puts $f "144 702 moveto ($buffer(1,comments)) show"
+    set timestring [format "%.2f " $buffer(2,tottime)]
+    puts $f " 72 693 moveto (Buffer 2:) show"
+    puts $f "144 693 moveto ($buffer(2,filename)) show"
+    puts $f "288 693 moveto ($buffer(2,starttime)) show"
+    puts $f "396 693 moveto ($buffer(2,mode)) show"
+    puts $f "432 693 moveto ($timestring sec) show"
+    puts $f "144 684 moveto ($buffer(2,comments)) show"
+    set timestring [format "%.2f " $buffer(3,tottime)]
+    puts $f " 72 675 moveto (Buffer 3:) show"
+    puts $f "144 675 moveto ($buffer(3,filename)) show"
+    puts $f "288 675 moveto ($buffer(3,starttime)) show"
+    puts $f "396 675 moveto ($buffer(3,mode)) show"
+    puts $f "432 675 moveto ($timestring sec) show"
+    puts $f "144 666 moveto ($buffer(3,comments)) show"
+    set timestring [format "%.2f " $buffer(4,tottime)]
+    puts $f " 72 657 moveto (Buffer 4:) show"
+    puts $f "144 657 moveto ($buffer(4,filename)) show"
+    puts $f "288 657 moveto ($buffer(4,starttime)) show"
+    puts $f "396 657 moveto ($buffer(4,mode)) show"
+    puts $f "432 657 moveto ($timestring sec) show"
+    puts $f "144 648 moveto ($buffer(4,comments)) show"
+    puts $f " 72 639 moveto (Detectors:) show "
+    puts $f "144 639 moveto ($detstring) show"
+    puts $f "grestore"
+    close $f
+    unset f
+
+    if [catch {exec cat $outfile >> $finalfile} result] {
+	PutText $result
+    }
+
+    if [catch {eval exec $lprcmd $finalfile} result] {
+	PutText $result
+    }
+    catch {exec rm -f $outfile} result
+#    catch {exec rm -f $finalfile} result
+}
+
+proc ShowNewDet { d } {
+    global xs chans dets view buffer
+
+    if {[string compare $d "all"] == 0} {
+	if {!$view(integrate_done)} { 
+	    for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+		if {$buffer($i,active)} { Integrate $i }
+	    }
+	}
+	ordinal export 0 20 hvec
+	narray2vec hvec x xs
+	for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+	    if {$buffer($i,active)} {
+		.g element configure e0 -xdata xs -ydata $buffer($i,ydet)
+	    }
+	}
+	.g xaxis configure -title "Detector"
+	set view(currentdet) all
+	return 
+    } elseif {[string compare $d "sum"] == 0} {
+	set detlabel "Det: sum"
+	set view(currentdet) $d
+	set ndets 0
+	for {set i 0} {$i < 20} {incr i} {
+	    lappend mask $view($i)
+	    if {$view($i)} { incr ndets }
+	}
+	if {$view(norm_mon)} {
+	    .g yaxis configure -title "Counts/Monitor"
+	} elseif {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Counts"
+	}
+
+	switch $buffer(current_mode) {
+	    teach {
+		ordinal export 0 4096 hvec
+		narray2vec hvec x xs
+		.g xaxis configure -title "PST Channel"
+	    }
+	    standard {
+		narray2vec energy x xs
+		.g xaxis configure -title "Energy (ueV)"
+	    }
+	    hybrid {
+		ordinal export 0 2048 hvec
+		hvec map {[] = 2 * $[];}
+		narray2vec hvec x xs
+		.g xaxis configure -title "PST Channel"
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+	for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+	    if {$buffer($i,active)} {
+		$buffer($i,data) collapse {1 0} $mask hvec
+		if {$ndets > 0} {
+		    hvec vset ndets $ndets
+		    hvec map {[] /= $ndets;}
+		}
+		narray2vec hvec x $buffer($i,y)
+		.g element configure e$i -xdata xs -ydata $buffer($i,y)
+	    }
+	}
+    } elseif [regexp {sample(.*)} $d match s_typ] {
+	switch $s_typ {
+	    mon {
+		if {[string compare $buffer(current_mode) "teach"]==0} {
+		    set sampledet 19
+		} else {
+		    set sampledet 20
+		}
+	    }
+	    lo {
+		if {[string compare $buffer(current_mode) "standard"] || \
+			[string compare $buffer(current_mode) "hybrid"]} {
+		    return -code error "ERR:\nNot available in this mode"
+		}
+		set sampledet 21
+	    }
+	    hi {
+		if {[string compare $buffer(current_mode) "standard"] || \
+			[string compare $buffer(current_mode) "hybrid"]} {
+		    return -code error "ERR:\nNot available in this mode"
+		}
+		set sampledet 22
+	    }
+	    default {
+		return -code error "ERR:\nSampling type not available"
+	    }
+	}
+
+	set view(currentdet) $d
+	if {$view(norm_mon)} {
+	    .g yaxis configure -title "Counts/Monitor"
+	} elseif {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Counts"
+	}
+	switch $buffer(current_mode) {
+	    teach {
+		ordinal export 0 4096 hvec
+		narray2vec hvec x xs
+		.g xaxis configure -title "PST Channel"
+	    }
+	    hybrid {
+		ordinal export 0 4096 hvec
+		narray2vec hvec x xs
+		.g xaxis configure -title "PST Channel"
+	    }
+	    standard {
+		narray2vec energy x xs
+		.g xaxis configure -title "Energy (ueV)"
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+	for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+	    if {$buffer($i,active)} {
+		narray2vec $buffer($i,total) $sampledet x $buffer($i,y)
+		.g element configure e$i -xdata xs -ydata $buffer($i,y)
+	    }
+	}
+    } else {
+	if {$d >= $dets($buffer(current_mode))} {
+	    PutText "ERR:\nRequested detector out of bounds"
+	    return
+	}
+	switch $buffer(current_mode) {
+	    teach {
+		ordinal export 0 4096 hvec
+		narray2vec hvec x xs
+		.g xaxis configure -title "PST Channel"
+	    }
+	    standard {
+		narray2vec energy x xs
+		.g xaxis configure -title "Energy (ueV)"
+	    }
+	    hybrid {
+		ordinal export 0 2048 hvec
+		hvec map {[] = 2 * $[];}
+		narray2vec hvec x xs
+		.g xaxis configure -title "PST Channel"
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+	set view(currentdet) $d
+	if {$view(norm_mon)} {
+	    .g yaxis configure -title "Counts/Monitor"
+	} elseif {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Counts"
+	}
+	for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+	    if {$buffer($i,active)} {
+		narray2vec $buffer($i,data) $d x $buffer($i,y)
+		.g element configure e$i -xdata xs -ydata $buffer($i,y)
+	    }
+	}
+
+    }
+}
+
+proc PutText { input } {
+    .t configure -text $input
+}
+
+proc AppendText { input } {
+    set displaytext [.t configure -text]
+    if {[string length $displaytext] > 0} {
+	append displaytext "\n"
+    }
+    append displaytext $input
+    .t configure -text $displaytext
+}
+
+proc BufferPanelBuild { f } {
+    global buffer
+
+    if [catch {frame $f} result] {
+	return -code error $result
+    }
+
+    label $f.numlab  -text "#"
+    label $f.plotlab -text "Plot"
+    label $f.filelab -text "Filename"  -width 20
+    label $f.commlab -text "Comments"  -width 60
+    label $f.timelab -text "Time(sec)" -width 12
+    label $f.delelab -text "Delete"
+
+    grid $f.numlab  -row 0 -column 0
+    grid $f.plotlab -row 0 -column 1
+    grid $f.filelab -row 0 -column 2 -sticky w
+    grid $f.commlab -row 0 -column 3 -sticky w
+    grid $f.timelab -row 0 -column 4 -sticky w
+    grid $f.delelab -row 0 -column 5
+
+    for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+	label $f.num$i -text $i -foreground [lindex $buffer(colors) $i]
+	set buffer($i,showwid) [checkbutton $f.plot$i \
+		-variable buffer($i,show) -text "" -command "BufferToggle $i" ]
+	label $f.file$i -textvariable buffer($i,filename) -anchor w
+	label $f.comm$i -textvariable buffer($i,comments) -anchor w
+	label $f.time$i -textvariable buffer($i,tottime) -anchor e
+	button $f.dele$i -image skull -padx 0 -pady 0 -command "BufferDelete $i"
+	set row [expr $i + 1]
+	grid $f.num$i  -row $row -column 0 
+	grid $f.plot$i -row $row -column 1
+	grid $f.file$i -row $row -column 2 -sticky w
+	grid $f.comm$i -row $row -column 3 -sticky w
+	grid $f.time$i -row $row -column 4 -sticky e
+	grid $f.dele$i -row $row -column 5
+    }
+    return $f
+}
+
+proc BufferDelete { bufno } {
+    global buffer chans dets
+    PutText "Deleting contents of buffer $bufno"
+    # set y and ydet to zero
+    # clear narrays
+    # set array variables to initialized values
+    narray2vec hvec x $buffer($bufno,y)
+    for {set i 0} {$i < 20} {incr i} {
+	set $buffer($bufno,ydet) 0.0
+    }
+    BufferHide $bufno
+    set buffer($bufno,filename) -empty-
+    set buffer($bufno,tottime)  0.0
+    set buffer($bufno,starttime) "01-Jan-1970 00:00:00"
+    set buffer($bufno,mode)     teach
+    set buffer($bufno,comments) ""
+    
+    set buffer($bufno,active)   0
+    set buffer(nactive) [expr $buffer(nactive) - 1]
+    if {0 == $buffer(nactive)} {
+	set buffer(current_mode) null
+    }
+    update
+}
+
+proc BufferToggle { bufno } {
+    global buffer
+    if {$buffer($bufno,show)} {
+	BufferShow $bufno
+    } else {
+	BufferHide $bufno
+    }
+}
+
+proc BufferShow { bufno } {
+    global buffer
+    if {$buffer($bufno,active)} {
+	.g element configure e$bufno -hide 0
+	set buffer($bufno,show) 1
+    }
+}
+
+proc BufferHide { bufno } {
+    global buffer
+    if {$buffer($bufno,active)} {
+	.g element configure e$bufno -hide 1
+	set buffer($bufno,show) 0
+    }
+}
+
+# Build GUI >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#
+set m [frame .mbar -relief raised -borderwidth 2]
+set g [blt::graph .g]
+set t [label .t -height 4 -font fixed -relief sunken -justify left -anchor nw]
+set f [BufferPanelBuild .f]
+set b [frame .buttons -relief raised -borderwidth 2]
+set bn [frame $b.norm]
+set bnl [label $bn.label -text "Normalization:"]
+set bns [checkbutton $bn.sample -text "P(v)" -variable view(norm_smpl) \
+	-command ApplyNormSmpl ]
+set bnm [checkbutton $bn.monitor -text Monitor -variable view(norm_mon) \
+	-command ApplyNormMon ]
+
+set d [frame .dmask -relief raised -borderwidth 2]
+set dl [label .dmask.l -text "Detectors:"]
+pack $dl -in $d -side left
+for {set i 1} {$i < 17} {incr i} {
+    checkbutton $d.$i -text [format "%02d" $i] \
+		-variable view($i) -command "ShowNewDet sum"
+    pack $d.$i -in $d -side left
+}
+
+for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+    .g element create e$i
+    .g element configure e$i -xdata xs -ydata y$i -symbol none -hide 1 \
+	    -color [lindex $buffer(colors) $i]
+}
+
+#.g configure -leftmargin 25m -rightmargin 10m -topmargin 10m -bottommargin 20m
+.g configure -title ""
+.g xaxis configure -title "PST Channel"
+.g yaxis configure -title "Counts"
+.g legend configure -hide 0
+.g postscript configure -landscape 1
+
+set mf [menubutton $m.file    -width 5 -text File    -underline 0 \
+	-menu $m.file.menu]
+set me [menubutton $m.edit    -width 5 -text Edit    -underline 0 \
+	-menu $m.edit.menu]
+set mv [menubutton $m.view    -width 5 -text Plot    -underline 0 \
+	-menu $m.view.menu]
+
+
+set mfm [menu $mf.menu]
+$mfm add cascade -label "Open"         -underline 0 -menu $mfm.open
+$mfm add cascade -label "Save Current" -underline 0 -menu $mfm.save
+$mfm add command -label "Print Setup"  -underline 1 -command PrintCmdSetup
+$mfm add command -label "Print"        -underline 0 -command PrintGraph
+$mfm add command -label "Exit"         -underline 1 -command exit
+
+set mfmo [menu $mfm.open]
+set mfms [menu $mfm.save]
+for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+    $mfmo add command -label "Buffer $i" -command "OpenData $i"
+    $mfms add command -label "Buffer $i" -command "SaveData $i"
+}
+
+set mem [menu $me.menu]
+$mem add command -label "Scale Axes"   -command ShowScaleControl
+
+set mvm [menu $mv.menu]
+$mvm add cascade -label "Table"     -menu $mvm.table 
+$mvm add command -label "All"       -command "ShowNewDet all"
+$mvm add separator
+$mvm add command -label "Monitor"   -command "ShowNewDet 0"
+$mvm add command -label "Detectors" -command "ShowNewDet sum"
+$mvm add command -label "P(v)"      -command "ShowNewDet samplemon"
+
+set mvmt [menu $mvm.table]
+for {set i 0} {$i < $buffer(nbuf)} {incr i} {
+    $mvmt add command -label "Buffer $i" -command "ShowSumTable $i"
+}
+
+wm title . "Data Browser"
+pack $m -side top -fill x -anchor nw
+pack $t -side top -fill x -anchor nw
+pack $f -side top -fill x -anchor nw
+pack $g -side top -expand true -fill both 
+pack $b -side top -fill x -anchor sw
+pack $d -side top -anchor sw -fill x
+pack $mf $me $mv -side left -in $m
+#pack $md -side right -in $m
+pack $bn -side left -in $b
+pack $bnl $bns $bnm -side left -in $bn
+
+#
+# Last minute initializations, just to get the ball rolling
+Blt_ZoomStack .g
+BuildSumTable
+BuildMaskTable
+BuildScaleControl
+
+if {[llength $argv] > 0} {
+    tkwait visibility .
+    update
+    puts "Opening [lindex $argv 0]"
+    if [catch {OpenData 0 [lindex $argv 0]} result] {
+	PutText "Unable to open [lindex $argv 0]"
+    }
+}

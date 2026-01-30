@@ -1,0 +1,271 @@
+#!/usr/bin/tclsh
+
+if {!$argc} {
+    puts stderr "Usage: sequence <commandfile>"
+    exit
+}
+
+set debug 0
+set seq_file  [lindex $argv 0]
+set logfile   "sequence.log"
+set wait_time 60
+
+if {![file exists $seq_file]} {
+    puts stderr "File $seq_file does not exist!"
+    exit
+}
+
+if { $debug } {
+    set r tcp0
+} else {
+    package require dp
+    if [catch {dp_MakeRPCClient localhost 51330} r] {
+	puts stderr "Can't connect to core program. Exiting..."
+	exit
+    }
+}
+
+
+proc Launch { args } {
+    global r log debug
+    set cmd "dp_RPC $r "
+    foreach c $args {
+	append cmd "$c "
+    }
+    puts "Sending: $cmd"
+    if { !$debug } { 
+	WriteLog $cmd
+	return [eval $cmd]
+    }
+}
+
+proc FormatTime { Timeval } {
+    return [clock format $Timeval -format "%d-%b-%Y %H:%M:%S"]
+}
+
+proc WriteLog { msg } {
+    global logfile debug
+    set log [open $logfile a]
+    puts $log "[FormatTime [clock seconds]] - $msg"
+    close $log
+}
+
+# PopSequence - this procedure reads the command file and "pops" the top
+#               command off the stack, rewriting the file with the remaining
+#               commands, terminating the program if there are none.
+#
+proc PopSequence { infile } {
+    global log
+    if {![file exists $infile]} {
+	exit
+    }
+    set f [open $infile r]
+    if {[gets $f cmdline] < 0} {
+	close $f
+	exec rm $infile
+	exit
+    }
+
+    if [catch {read $f} remainder] {
+	close $f
+	exec rm $infile
+	exit
+    }
+
+    close $f
+    set f [open $infile w]
+    foreach line [split $remainder \n] {
+	if {[string length $line] > 0} {
+	    puts $f $line
+	}
+    }
+    close $f
+    return $cmdline
+}
+
+proc WaitRun { } {
+    global debug
+    set result 1
+    if { $debug } { return }
+    while {$result} {
+	after [expr 60 * 1000]
+	catch {Launch run status} result
+    }
+    # If the run finishes, then we should leave this routine
+    return
+}
+
+# Start run from run buffer
+proc RunBuffer { bufno } {
+    global env
+    if {![file exists $env(HOME)/hfbsbuf.prm]} {
+	return -code error "No parameter file"
+    }
+    source $env(HOME)/hfbsbuf.prm
+
+    if [catch {Launch run buffer $bufno} result] {
+	set output "Error encountered in starting run: $result"
+	puts stderr $output
+	WriteLog    $output
+	return
+    }
+
+    WaitRun
+}
+
+proc ManageRun { args } {
+    if {[llength $args] < 2} {
+	set output "Syntax: run <start/buffer> <args>"
+	puts stderr $output
+	WriteLog $output
+    }
+    set subcmd [lindex $args 0]
+    switch $subcmd {
+	start {
+	    if [catch {Launch run start [lrange $args 1 end]} result] {
+		output "Error encountered in starting run:$result"
+		puts stderr $output
+		WriteLog $output
+		return
+	    }
+	}
+	buffer {
+	    return [RunBuffer [lindex $args 1]]
+	}
+	default {
+	    puts stderr "Unsupported subcommand"
+	}
+    } 
+    return
+}
+
+proc ManageDoppler { args } {
+    if {[llength $args] < 2} {
+	set output "Syntax: doppler speed <value>"
+	puts stderr $output
+	WriteLog $output
+    }
+    set subcmd [lindex $args 0]
+    switch $subcmd {
+	speed {
+	    if [catch {expr [lindex $args 1] * 1.0}] {
+		set output "Specify real number for Doppler speed!"
+		puts stderr $output
+		WriteLog $output
+	    } else {
+		if [catch {Launch doppler speed [lindex $args 1]} result] {
+		    set output "Error setting doppler speed: $result"
+		    puts stderr $output
+		    WriteLog $output
+		    return
+		}
+	    }
+	}
+	default {
+	    set output "Invalid doppler option: $subcmd"
+	    puts stderr $output
+	    WriteLog $output
+	}
+    }    
+}
+
+proc ManageTemp { args } {
+    if {[llength $args] < 2} {
+	set output "Syntax: temperature set <value>"
+	puts stderr $output
+	WriteLog $output
+    }
+    set subcmd [lindex $args 0]
+    switch $subcmd {
+	set {
+	    if [catch {expr [lindex $args 1] * 1.0}] {
+		set output "Specify real number for temperature"
+		puts stderr $output
+		WriteLog $output
+	    } else {
+		if [catch {Launch temperature set [lindex $args 1]} result] {
+		    set output "Error setting temp: $result"
+		    puts stderr $output
+		    WriteLog $output
+		    return
+		}
+	    }
+	}
+	default {
+	    set output "Doppler options: speed"
+	    puts stderr $output
+	    WriteLog $output
+	}
+    }    
+}
+
+proc ManageWait { args } {
+    if {[llength $args] < 1} {
+	set output "Syntax: wait <run/time> ?<params>?: $cmdline"
+	puts stderr $output
+	WriteLog $output
+    }
+    set subcmd [lindex $args 0]
+    switch $subcmd {
+	run {
+	    WaitRun
+	}
+	seconds {
+	    if { [llength $args] < 2 } {
+		WriteLog "Wait: must specify wait time (in sec)"
+	    } else {
+		if [catch {expr [lindex $args 1] * 1000} \
+			waittime] {
+		    WriteLog "Wait: specify wait time as integer"
+		} else {
+		    puts "Waiting for [lindex $args 1] sec"
+		    after $waittime
+		}
+	    }
+	}
+	minutes {
+	    if { [llength $args] < 2 } {
+		WriteLog "Wait: must specify wait time (in sec)"
+	    } else {
+		if [catch {expr [lindex $args 1] * 60000} \
+			waittime] {
+		    WriteLog "Wait: specify wait time as integer"
+		} else {
+		    puts "Waiting for [lindex $args 1] min"
+		    after $waittime
+		}
+	    }
+	}
+	default {
+	    set output "Unsupported wait command: $subcmd"
+	    puts stderr $output
+	    WriteLog $output
+	}
+    }
+}
+
+# Main loop
+while { 1 } {
+    set cmdline  [PopSequence $seq_file]
+    set cmdparts [split $cmdline]
+    set cmd      [lindex $cmdparts 0]
+    set cmdargs  [lrange $cmdparts 1 end]
+    switch $cmd {
+	run {
+	    eval ManageRun $cmdargs
+	}
+	doppler {
+	    eval ManageDoppler $cmdargs
+	}
+	temperature {
+	    eval ManageTemp $cmdargs
+	}
+	wait {
+	    eval ManageWait $cmdargs
+	}
+	default {
+	    WriteLog "Unsupported command: $cmdline"
+	}
+    }
+}
+

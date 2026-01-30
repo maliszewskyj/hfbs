@@ -1,0 +1,53 @@
+#!/usr/bin/perl
+#
+# Calculate flight time offset correction
+#       All distances are reported in meters
+#       All times are reported in seconds
+
+$usage = 
+ "Usage: gen_ptr [-M <d_ms>] [-S <d_sm>] [-s <d_sad>] [-v <v_bragg>]\n".
+ "   -M <d_ms>                     monochromator-sample distance\n".
+ "   -S <d_sm>                     sample-monitor distance\n".
+ "   -s <d_sad>                    sample-analyser-detector distance\n".
+ "   -v <v_bragg>                  velocity of incident neutrons\n".
+ "   -g <group delay>              group delay of ADCs (in microsec)\n".
+ "   -t <time_bin>                 time channel width (in microsec)\n".
+ "   specify distances in meters and velocities in meters/sec\n";
+
+require "getopts.pl";
+if (!&Getopts('M:s:S:v:g:t:')) {
+  print $usage;
+  exit;
+}
+
+$debug = 0;
+$v_bragg = 630.825;
+$d_ms  = 2.25;
+$d_sad = 4.12;
+$d_sm  = -0.09;
+$t_bin = 30e-6;
+$t_grp = 0;
+$maxdrange = 0.082;
+$d_off=0;
+$v_off=0;
+
+# Process command line options
+if ($opt_M) { $d_ms   = 1.0 * $opt_M; } 
+if ($opt_S) { $d_sm   = 1.0 * $opt_S; }
+if ($opt_s) { $d_sad  = 1.0 * $opt_s; }
+if ($opt_v) { $v_bragg= 1.0 * $opt_v; }
+if ($opt_t) { $t_bin  = 1.0e-6 * $opt_t; }
+if ($opt_g) { $t_grp  = 1.0e-6  * $opt_g;}
+
+# Calculate 
+$d_mon = $d_ms + $d_sm;
+$d_det = $d_ms + $d_sad;
+
+$t_mon = int( (($d_mon / $v_bragg) - $t_grp) / $t_bin);
+$t_dhi = int( (($d_det / $v_bragg) - $t_grp) / $t_bin);
+$t_dlo = 1;
+$t_dum = 400;
+
+printf "%d\n%d\n%d\n%d\n",$t_mon,$t_dhi,$t_dlo,$t_dum;
+
+

@@ -1,0 +1,15 @@
+#!/usr/bin/tclsh
+
+package require dp
+set r [dp_MakeRPCClient localhost 51330]
+
+proc Launch { args } {
+    global r
+    set cmd "dp_RPC $r "
+    foreach c $args {
+	append cmd "$c "
+    }
+#    puts $cmd
+    return [eval $cmd]
+}
+

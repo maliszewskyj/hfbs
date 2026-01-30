@@ -1,0 +1,10 @@
+630.825 5.2178e-3 200.0 2.25 4.12 -0.09 868
+1 1
+# Comments from here on down
+#
+# First  line: v_bragg energy_conv e_range d_ms d_sad d_sm enc_offset
+# Second line: bin_to_uev(1=yes,0=no) use_ftoff(1=yes,0=no)
+#
+# Measured  encoder offset = 1892 (mono at extreme of motion)
+# Corrected encoder offset =  868
+#

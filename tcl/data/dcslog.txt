@@ -1,0 +1,16 @@
+ 21-JAN-1997 17:28:27.16  JOHN: Setting wl
+ 21-JAN-1997 17:28:27.46 Command: Setwl; wavelength      2.100 A
+ 21-JAN-1997 17:28:27.58          Setwl; master speed:      20000 rpm
+ 21-JAN-1997 17:28:27.70          Setwl; resolution mode: 2
+ 21-JAN-1997 17:28:27.81          Setwl; frame overlap mode: 02 ([m-1]/m)
+ 21-JAN-1997 17:28:27.93          Setwl; frame overlap denominator (m): 11
+ 23-JAN-1997 10:30:49.02  FELIX: Setting speed ratios
+ 23-JAN-1997 10:30:55.55 Command: set sp ratio to  9/10 for  5
+ 23-JAN-1997 16:13:29.77  FELIX: Setting speed ratios
+ 23-JAN-1997 16:13:36.62 Command: set sp ratio to  7/ 8 for  5
+ 23-JAN-1997 16:35:44.48  FELIX: Setting wl
+ 23-JAN-1997 16:35:44.80 Command: Setwl; wavelength      7.000 A
+ 23-JAN-1997 16:35:44.90          Setwl; master speed:      20000 rpm
+ 23-JAN-1997 16:35:45.01          Setwl; resolution mode: 1
+ 23-JAN-1997 16:35:45.11          Setwl; frame overlap mode: 02 ([m-1]/m)
+ 23-JAN-1997 16:35:45.21          Setwl; frame overlap denominator (m): 08

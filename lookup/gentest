@@ -1,0 +1,24 @@
+#!/usr/bin/perl
+
+sub CalcICSVal {
+    local($i) = @_;
+    local($val);
+    if ($i & 0x400) {
+	$val = - ( ~$i & 0x7ff );
+	$val -= 1;
+    } else {
+	$val = $i;
+    }
+    $val += $offset;
+    $val += 0x400;
+    if ($val > 2047) { $val = 2047; }
+    if ($val < 0)    { $val = 0; }
+    return $val;
+}
+
+
+for ($i=0;$i<256;$i++) {
+    $out = &CalcICSVal($i<<3);
+    $j = $i<<3;
+    print "$j $out\n";
+}

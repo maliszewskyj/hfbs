@@ -1,0 +1,53 @@
+#!/usr/bin/perl
+#
+# Findcore - "All-in-one" tool for starting/stopping/finding dcs core program
+#
+# Create links "killcore" and "startcore" pointing to this file
+#
+# $Id: killcore,v 1.2 2010/02/25 14:10:46 nickm Exp $
+
+$executable = "/usr/local/hfbs/tcl/hfbscore";
+$stdoutlog  = "/usr/local/hfbs/log/stdout.log";
+
+sub Findcore {
+    my(@procs,@proc,$pid);
+    @procs = `ps -edalf | grep dcscore | grep tclsh | grep -v 'sh -c'`;
+    if ($#procs < 0) {
+	return 0;
+    }
+    $_ = $procs[0];
+    @proc = split;
+    $pid = $proc[3];
+    return $pid;
+}
+
+
+#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+#
+# In any case, determine whether the core program is running by checking PID
+$pid = Findcore();
+
+if ($0 =~ /startcore/) {
+    die "Core program appears to be running: PID = $pid\n" if ($pid > 0);
+    system "$executable >> $stdoutlog 2>&1 &";
+} elsif ($0 =~ /killcore/) {
+    die "Core program does not appear to be running\n" unless ($pid > 0);
+    print "Are you sure you want to kill the core program? [Y/N]:";
+    $_ = <>;
+    exit unless /y/i;
+    print "Sending TERM signal to core program. Please be patient.\n";
+    $| = 1;
+    $nkilled = kill TERM,$pid;
+    for ($i=0;$i<15;$i++) {
+	$pid = Findcore();
+	exit unless ($pid > 0);
+	sleep(1); print '.';
+    }
+    print "\nCore program did not respond to TERM signal. ";
+    print "Sending KILL signal.\n";
+    kill KILL,$pid;
+} else {
+    die "Core program does not appear to be running\n" unless ($pid > 0);
+    print "Core program is alive: PID=$pid\n";
+}
+

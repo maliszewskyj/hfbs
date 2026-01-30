@@ -1,0 +1,315 @@
+#!/usr/bin/tclsh
+
+package require dp
+set r [dp_MakeRPCClient localhost 51330]
+puts "Connected to server"
+#set r tcp0
+
+proc ShowCmds { } {
+    puts " C:  Read choppers                      W: Write to chopper "
+    puts " V:  Read vacuum gauges                 M: Monitor (Submon)"
+    puts " B:  Read choppers and vacuum gauges    Q: Quit monitoring "
+    puts " P:  Read Vacuum gauge setpoints        S: Status"
+    puts "WL:  Set wavelength                   AWL: Abort wavelength"
+    puts " R:  Run start                         RS: Run abort"
+    puts " X:  Shutdown                           A: Abort Shutdown"
+    puts "HM:  Hide Menu                         RM: Reveal Menu "
+}
+
+
+proc PromptUser { } {
+    puts " Select an option (C/V/B/P/WL/L/W/M/Q/S/AWL/X/A/HM/RM) "
+    puts -nonewline "           (<CR> to exit): "
+    flush stdout
+}
+
+proc Launch { args } {
+    global r
+    set cmd "dp_RPC $r "
+    foreach c $args {
+	append cmd "$c "
+    }
+#    puts "Sending: $cmd"
+    return [eval $cmd]
+}
+
+proc ReadCh { } {
+    set chops [GetChopList]
+    if {[llength $chops] == 0} { return }    
+    catch {Launch chopctrl read \{$chops\}} result
+    puts $result
+}
+
+proc WriteMS { } {
+    puts -nonewline "Enter Master Speed in the range (1200 - 20000) "
+    puts -nonewline "(<CR> to return to Main) : "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    if [catch { expr int($val) } val] {
+	puts stderr "ERR:\nSpecify a number for master speed"
+	return
+    }
+    if { [expr $val < 1200] || [expr $val > 20000] } { 
+	puts stderr "ERR:\nEnter value between 1200 and 20000!"
+	return 
+    }
+    catch {Launch chopctrl write 1 MasterSpeed $val} result
+    puts $result
+}
+
+proc WriteDF { } {
+    puts "Select df/dt from the following list:"
+    puts "  1   1.00"
+    puts "  2   0.70"
+    puts "  3   0.50"
+    puts "  4   0.35"
+    puts "  5   0.25"
+    puts "  6   0.18"
+    puts "  7   0.12"
+    puts "  8   0.09"
+    puts "  9   0.03"
+    puts -nonewline "Enter number (<CR> to return): "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    if {[regexp {[A-Za-z* ]} $val match]} {
+	puts stderr "ERR:\nInvalid number specified"
+	return
+    }
+    if { [expr $val < 1] || [expr $val > 9] } {
+	puts stderr "ERR:\nInvalid number specified"
+	return
+    }
+    catch {Launch chopctrl write 1 dfdt $val} result
+    puts $result
+}
+
+proc WriteNP { } {
+    set chops [GetChopList]
+    if {[llength $chops] == 0} { return }
+    puts -nonewline "Enter Nominal Phase (0.01 - 359.99)"
+    puts -nonewline "or <CR> to return to main MENU: "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    if [catch {expr int($val * 100)} val] { return }
+    catch {Launch chopctrl write $chops PhaseNom $val} result
+    puts $result
+}
+
+proc WritePW { } {
+    set chops [GetChopList]
+    if {[llength $chops] == 0} { return }
+    puts -nonewline "Enter phase window (0.01 - 1.00)"
+    puts -nonewline "or <CR> to return to main MENU: "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    if [catch {expr int($val * 100)} val] { return }
+    catch {Launch chopctrl write \{$chops\} PhaseWin $val} result
+    puts $result
+}
+
+proc WritePG { } {
+    puts            "Enter state of all 7 generators (0, 1, or x) separated"
+    puts -nonewline "  by spaces or <CR> to return to main MENU: "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    catch {Launch chopctrl pg $val} result
+    puts $result
+}
+
+proc WriteSR { } {
+    set chops [GetChopList]
+    if {[llength $chops] == 0} { return }
+    puts -nonewline "Enter speed ratio (x/y) "
+    puts -nonewline "or <CR> to return to main MENU: "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    catch {Launch chopctrl write $chops SpeedRatio $val} result
+    puts $result
+}
+
+proc SetWL { } {
+    puts -nonewline "Enter wavelength                             : ";    
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    set wl $val
+    puts -nonewline "Enter master speed                           : ";    
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    if [catch {expr int($val) } val] {
+	puts "ERR:\nEnter a number for MS!"
+	return
+    }
+    set ms $val
+    puts -nonewline "Enter frame overlap denominator (m=1..16)    : "; 
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    set mfo $val
+    puts -nonewline "Enter frame overlap flag (1=1/m, 2 = (m-1)/m): "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    set fof $val
+    puts -nonewline "Enter resolution mode (1=low,2=med,3=high)   : "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    set imode $val
+    catch {Launch chopctrl wavelength $wl $ms $fof $mfo $imode} result
+    puts $result
+    
+}
+
+proc AbortWL { } {
+    catch {Launch chopctrl abort wavelength} result
+    puts $result
+}
+
+proc Shutdown { } {
+    catch {Launch chopctrl shutdown} result
+    puts $result
+}
+
+proc AShut { } {
+    catch {Launch chopctrl abort shutdown} result
+    puts $result
+}
+
+proc MonitorStart { } {
+    catch {Launch monitor start all 1} result
+    puts $result
+}
+
+proc MonitorStop { } {
+    catch {Launch monitor cancel} result
+    puts $result
+}
+
+proc GetStatus { } {
+    catch {Launch status} result
+    puts $result
+}
+
+proc RunStart { } {
+    puts -nonewline "Enter time channel width (seconds) \[1e-6\]: "
+    flush stdout
+    if {[gets stdin val] == 0} { 
+	puts "Using 1e-6 as dwell time" 
+	set dwell 1e-6
+    } else {
+	set dwell $val
+    }
+    puts -nonewline "Enter number of passes            : "
+    flush stdout
+    if {[gets stdin val] == 0} { return }
+    set npass $val
+    catch {Launch run start $dwell $npass} result
+    puts $result
+}
+
+proc RunStop { } {
+    catch {Launch run stop} result
+    puts $result
+}
+
+proc GetChopList { } {
+    puts -nonewline "Enter choppers: "
+    puts -nonewline "(ex: 135 or 0 or <CR> for all now in use):"
+    flush stdout
+    if {[gets stdin val] == 0} {
+	return {1 2 3 4 5 6 7}
+    } 
+    set val [string trimright $val]
+    if { $val == 0 } {
+	return
+    }
+    if {[regexp {[A-Za-z089* ]} $val match]} {
+	puts stderr "Invalid number specified"
+	return
+    }
+    return [split $val ""]
+}
+
+proc GetVGList { } {
+    puts -nonewline "Enter gauges  : (ex: 134 or 0 or <CR> for all now in use):"
+    flush stdout
+    if {[gets stdin val] == 0} {
+	return {1 2 3 4}
+    } 
+    set val [string trimright $val]
+    if { $val == 0 } {
+	return
+    }
+    if {[regexp {[A-Za-z5-9 ]} $val match]} {
+	puts stderr "Invalid number specified"
+	return
+    }
+    return [split $val ""]
+}
+
+proc WriteChop { } {
+    puts "MS: Master speed "
+    puts "DF: DF/DT "
+    puts "PG: Pulse Generators "
+    puts "SR: Speed Ratio "
+    puts "NP: Nominal Phase"      
+    puts "PW: Phase Window  " 
+    puts "NC: Nominal Current"
+
+    puts -nonewline "Select an option (MS/DF/PG/SR/NP/PW/NC) "
+    puts -nonewline "(<CR> to return to main MENU):    "
+    flush stdout
+    if {[gets stdin cmd] == 0} { return }
+    set cmd [string toupper [string trimright $cmd]]
+    switch $cmd {
+	MS {
+	    WriteMS
+	}
+	DF {
+	    WriteDF
+	}
+	PG {
+	    WritePG
+	}
+	SR {
+	    WriteSR
+	}
+	NP {
+	    WriteNP
+	}
+	PW {
+	    WritePW
+	}
+    }
+}
+
+
+#<<<<<<<<<<<<<<<<<<<<<<The meat of the action
+#
+#
+set showcmds 0
+
+PromptUser
+while { [gets stdin cmd] != 0 } {
+
+    set cmd [string toupper $cmd] 
+    switch $cmd {
+	C { ReadCh    }
+	V { ReadVG    }
+	B { ReadBoth  }
+	W { WriteChop } 
+	WL { SetWL }
+	AWL { AbortWL }
+	X { Shutdown } 
+	A { AShut }
+	M { MonitorStart }
+	Q { MonitorQuit }
+	S { GetStatus }
+	R { RunStart } 
+	RS { RunStop }
+	RM { set showcmds 1 }
+	HM { set showcmds 0 } 
+	default {
+	    puts "\nError: unimplemented command\n"
+	}
+    }
+    if { $showcmds } { ShowCmds } 
+    PromptUser
+}

@@ -1,0 +1,9 @@
+New error file
+  4-FEB-1997 17:07:56.45   $disk2:[User.Cormon]FEB041997_01
+  7-FEB-1997 10:22:22.16 Setting WL aborted by user
+  7-FEB-1997 15:11:47.48 PC not communicating!!!!!
+  7-FEB-1997 15:16:06.85  Zero counts from pulse generator
+  7-FEB-1997 15:17:08.57  Zero counts from pulse generator
+  7-FEB-1997 15:18:09.44  Zero counts from pulse generator
+ 12-APR-1997 21:08:01.59   $disk2:[User.Cormon]APR121997_01
+ 17-NOV-1997 16:41:25.32   $disk2:[User.Cormon]NOV171997_01

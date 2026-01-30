@@ -1,0 +1,49 @@
+                                                                                                                            .
+                                                                                                                            .
+                                                                                                                            .
+         ****************************************************************
+         *                                                              *
+         *                                                              *
+         *                                                              *
+         *     !!!!!   CREATE A SCHARC-PORGRAM LOADER-FILE   !!!!!      *
+         *                                                              *
+         *                                                              *
+         *                                                              *
+         ****************************************************************
+                                                                                                                            .
+                                                                                                                            .
+                                                                                                                            .
+ P:\WS3112\WINNT\BIN;
+                                                                                                                            .
+            !!!!!!!!   Batchfile vom 3.8.99 MJ  LIST-SHARC   !!!!!!!!
+                                                                                                                            .
+                                                                                                                            .
+            !!!!!!!!!!!!!!!!!   ASEMBLER  PROGRAM   !!!!!!!!!!!!!!
+                                                                                                                            .
+
+Analog Devices ADSP-210x0 Assembler
+Release 3.3, Version 2.21
+Copyright (c) 1991-1996 Analog Devices, Inc.
+
+
+Analog Devices ADSP-210x0 Assembler 
+Release 3.3, Version 2.21
+Copyright (c) 1991-1997 Analog Devices, Inc.
+
+                                                                                                                            .
+            !!!!!!!!!!!!!!!!!!   LINKER  PROGRAM   !!!!!!!!!!!!!!!              
+                                                                                                                            .
+                                                                                                                            .
+            !!!!!!!!!!   CREATE LOADER-FILE  PROGRAM   !!!!!!!!!!!
+                                                                                                                            .
+
+Analog Devices ADSP-210x0 Loader
+Release 3.3, Version 2.3
+Copyright (c) 1991-1997 Analog Devices, Inc.
+
+                                                                                                                            .
+            !!!!!!!!!!         COPY LOADER-FILE        !!!!!!!!!!!
+                                                                                                                            .
+        1 Datei(en) kopiert.
+        1 Datei(en) kopiert.
+        1 Datei(en) kopiert.

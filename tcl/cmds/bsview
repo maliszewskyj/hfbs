@@ -1,0 +1,933 @@
+#!/usr/bin/wish
+#
+# bsview - Tool to examine HFBS data files
+#
+# Author: N. C. Maliszewskyj, NIST Center for Neutron Research
+#
+# $Id: bsview,v 1.1.1.1 1999/09/20 14:32:09 nickm Exp $
+
+# load shared libraries & packages
+package require BLT
+package require narray
+# fix BLT package screwup
+source /usr/lib/blt2.4/bltGraph.tcl
+foreach lib { libaryimg.so libmtxutil.so } {
+    if [catch {load $lib} result] {
+	puts stderr "Can't load shared library: $lib"
+	exit
+    }
+}
+
+narray create fullsize     20 4096
+narray create total        20 4096
+narray create data         1 1
+narray create pv           1 1
+narray create normalize    1 1
+narray create xvec         1 1
+narray create work2        1 1
+narray create hvec      4096
+narray create hsum         1
+narray create ordinal   4096
+narray create energy    4096
+# calculate energies associated with each velocity channel
+energy vset k1 5.22707e-3
+energy vset k2 1261.64
+energy vset v 0.0
+energy map {
+    v = (@0 - 2048.0)/204.8;
+    [] = $k1 * ($v * $v + $k2 * $v);
+}
+ordinal map {[] = @0;}
+total map {[] = 0;}
+set knownmodes {pst time velocity}
+array set chans { pst 4096 time 4096 velocity 4096 }
+array set dets  { pst   20 time   20 velocity   20 }
+array set prefs { ncyc    10 cycsec    600 mode pst comments "" }
+set colors { black grey20 grey40 grey60 grey80 \
+	IndianRed OrangeRed PaleVioletRed VioletRed \
+	SeaGreen PaleGreen SpringGreen DarkOliveGreen \
+	MidnightBlue SlateBlue SteelBlue CadetBlue }
+
+# Set up image to display
+set livetime 0.0
+blt::vector y(4096)
+blt::vector xs(4096)
+blt::vector x_e(2048)
+narray2vec ordinal x xs
+set mode pst
+
+blt::vector ydet(20)
+blt::vector xdet(20)
+for {set i 1} {$i < 17} {incr i} { blt::vector y${i}(4096) }
+for {set i 0} {$i < 20} {incr i} {    set xdet($i) $i }
+
+# Global variables
+set pstspeed 0
+set dopspeed 0
+set detlabel "Det:  0"
+set veclen         4096
+set filename "hfbs.dat"
+set printcmd "/usr/bin/lpr"
+set lprcmd   $printcmd
+
+# preferences
+set view(integrate)      0 
+set view(norm_smpl)      0
+set view(norm_mon)       0
+set view(currentdet)     sum
+set view(integrate_done) 0
+set view(norm_smpl_done) 0
+set view(norm_mon_done)  0
+set view(xauto)          1
+set view(xmin)           0
+set view(xmax)           1
+set view(yauto)          1
+set view(ymin)           0
+set view(ymax)           1
+# Set up detector channel integration mask
+set view(0)              0
+for {set i  1} {$i < 17} {incr i} {set view($i) 1}
+for {set i 17} {$i < 20} {incr i} {set view($i) 0}
+
+set runinfo(filename)  ""
+set runinfo(tottime)   0.0
+set runinfo(starttime) "01-Jan-1970 00:00:00"
+set runinfo(mode)      pst
+set runinfo(comments)  ""
+
+# Procedures 
+#
+
+proc ReadHFBS { filename } {
+    global livetime total fullsize mode runinfo
+
+    # Reset runinfo variables
+    set runinfo(filename)  ""
+    set runinfo(tottime)   0.0
+    set runinfo(starttime) "01-Jan-1970 00:00:00"
+    set runinfo(mode)      pst
+    set runinfo(comments)  ""
+    set runinfo(timebin)   30
+    set runinfo(user)      anonymous
+
+    if [catch {open $filename r} infile] {
+	return -code error $infile
+    }
+    set runinfo(filename) $filename
+    set curdet -1
+    while {[gets $infile line] >= 0} {
+	if [regexp {^#} $line] {
+	    if [regexp {^#Live([^:]*):(.*)} $line match spaces livetime] {
+		set livetime [expr 1.0 * $livetime]
+		set runinfo(tottime) $livetime
+	    }
+	    if [regexp {^#Start([^:]*):(.*)} $line match spaces starttime] {
+		set runinfo(starttime) $starttime
+	    }
+	    if [regexp {^#Comments([^:]*):(.*)} $line match spaces comments] {
+		set runinfo(comments) $comments
+	    }
+	    if [regexp {^#User([^:]*):(.*)} $line match spaces user] {
+		set runinfo(user) $user
+	    }
+	    if [regexp {^#Time([^:]*):(.*)} $line match spaces timebin] {
+		set runinfo(timebin) $timebin
+	    }	    
+	    if [regexp {^#Run Mode([^:]*):(.*)} $line match spaces vmemode] {
+		set mode [string trimleft [string trimright $vmemode]]
+		set runinfo(mode) $mode
+		switch $mode {
+		    pst {}
+		    time {}
+		    velocity {}
+		    default {
+			close $infile
+			return "ERR:\nUnrecognized mode"
+		    }
+		}
+		fullsize export {0 0} {20 4096} total
+	    }
+	    if [regexp {^# Detector(.*)} $line match det] {
+		set curdet [expr 1 * $det]
+	    }
+	} else {
+	    if {$curdet < 0} { continue }
+	    if {[scan $line "%d %f" chan val] == 2} {
+		total aset $curdet $chan $val
+	    }
+	}
+    }
+    close $infile
+    return $filename
+}
+
+proc OpenData { {infile {}} } {
+    global total detlabel xs y .g mode chans dets \
+	    veclen view knownmodes
+
+    set types {
+	{{HFBS Files}       {.hfbs}        HFBS} 
+	{{All Files}        *             }
+    }
+    if {[string length $infile] == 0} {
+	set filename [tk_getOpenFile -initialdir /home/hfbs/data \
+		-filetypes $types]
+    } else {
+	set filename $infile
+    }
+    if {[string length $filename] == 0} { return } 
+    PutText "Reading data: please wait"
+    BusyCursorOn
+    update
+    if [catch {ReadHFBS $filename} result] {
+	PutText $result
+	return
+    }
+    PutText ""
+    BusyCursorOff
+    update
+    
+    set veclen $chans($mode)
+    set sub [expr $chans($mode) / 1024]
+
+    set view(integrate_done) 0
+    set view(norm_smpl_done) 0
+    set view(norm_mon_done)  0
+    SplitMats
+    Integrate
+
+    # Apply view options
+
+    if {$view(norm_smpl)} { NormalizeSample  }
+    if {$view(norm_mon) } { NormalizeMonitor }
+    ShowNewDet $view(currentdet) 
+
+    return 0
+}
+
+proc Integrate { } {
+    global ydet xdet control chans view livetime mode
+
+    PutText "Integrating over velocity/PST channels."
+    BusyCursorOn
+    update
+    
+    data collapse {0 1} hvec
+    narray2vec hvec x ydet
+    .sum.l configure -text [ListSum]
+    set ydet(0) 0 ;# Kludge for high counts in monitor channel
+    PutText ""
+    BusyCursorOff
+    update
+    set view(integrate_done) 1
+    return $view(integrate_done)
+}
+
+#
+# Split block of data received from VME system into portions suitable for
+# writing to a file.
+#
+proc SplitMats { } {
+    global logs mode total work2 control livetime dets chans view
+    
+    PutText "Processing raw data"
+    BusyCursorOn
+    update
+
+    mtx split $mode total data pv xvec
+    pv export {0 0} [pv dimensions] normalize
+    PutText ""
+    BusyCursorOff
+    update
+    return 0
+}
+
+proc BusyCursorOn {} {
+    . configure -cursor watch
+    .g configure -cursor watch
+}
+
+proc BusyCursorOff {} {
+    . configure -cursor {}
+    .g configure -cursor crosshair
+}
+
+#
+# Normalize data to sample histograms
+#
+proc NormalizeSample { } {
+    global ydet xdet mode chans livetime view
+
+    PutText "Normalizing to sample histograms."
+    BusyCursorOn
+    update
+    # Multiply []/$normalize[] by 50000 to get rate in C/s
+    # Multiply []/$normalize[] by 50000/60=833.33 to get rate in C/min
+    data map {
+	$normalize[] < 0.000000001 ? [] = 0 : [] = $[] * 833.33 / $normalize[];
+    } {normalize normalize}
+
+    PutText ""
+    BusyCursorOff
+    update
+    set view(norm_smpl_done) 1
+    return $view(norm_smpl_done)
+}
+
+#
+# Normalize data to monitor
+#
+proc NormalizeMonitor { } {
+    global mode chans livetime view
+
+    # if {!$view(norm_smpl_done)} { NormalizeSample }
+    PutText "Normalizing to monitor."
+    BusyCursorOn
+    update
+    # Fill narray normalize with values from monitor channel
+    data export {0 0} [list 1 $chans($mode)] work2
+    for {set i 0} {$i < 20} {incr i} {
+	normalize import [list $i 0] work2
+    }
+
+    data map { 
+	$normalize[] < 0.000001 ? divisor = 1 : divisor = $normalize[]; 
+	[] /= $divisor; 
+    } {normalize normalize}
+
+    PutText ""
+    BusyCursorOff
+    update
+    set view(norm_mon_done) 1
+    return $view(norm_mon_done)
+}
+
+# Print a list of sums over all velocity/PST channels
+#
+#
+proc BuildSumTable { } {
+    toplevel .sum
+    wm withdraw .sum
+    label .sum.l -width 30 -height 20 -font fixed -justify left -anchor nw
+    frame .sum.b
+    button .sum.b.dismiss -text "Dismiss" -command HideSumTable
+    button .sum.b.print -text "Print" -command PrintSum
+    pack .sum.l .sum.b -side top -expand true -fill x
+    pack .sum.b.dismiss .sum.b.print -in .sum.b -side left -fill x -expand true
+}
+
+proc HideSumTable {} {
+    wm withdraw .sum
+}
+
+proc ShowSumTable {} {
+    wm deiconify .sum
+}
+
+proc PrintSum {} {
+    global lprcmd
+    set output [lindex [.sum.l configure -text] end]
+    if [catch { eval exec echo $output | $lprcmd } result] {
+	PutText $result
+    }
+}
+
+proc ListSum { } {
+    global ydet xdet mode dets chans livetime view
+
+    set output ""
+    if {$livetime > 1.0} {
+	set ltime [expr $livetime / 60.0]
+    } else {
+	set ltime 1.0
+    }
+    append output "Live Time(min):    "
+    append output [format "%10.2f\n" $ltime]
+    append output "Det   Counts(raw) Rate(c/min)\n"
+    for {set i 0} {$i < 17} {incr i} {
+	append output [format " %2.0f" $xdet($i)]
+	append output [format " %12.0f" $ydet($i)]
+	append output [format " %12.2f" [expr $ydet($i) / $ltime]]
+	append output "\n"
+    }
+    set trate 0.0
+    for {set i 5} {$i < 17} {incr i} { set trate [expr $trate + $ydet($i)]}
+    append output "Rate (5-16):     "
+    append output [format "%12.2f" [expr $trate / $ltime]]
+    return $output
+}
+
+proc DisableMaskEntry { } {
+    for {set i 1} {$i < 17} {incr i} {
+	.dmask.$i configure -state disabled
+    }
+}
+
+proc EnableMaskEntry { } {
+    for {set i 1} {$i < 17} {incr i} {
+	.dmask.$i configure -state normal
+    }
+}
+
+proc BuildMaskTable { } {
+    global view
+    toplevel .mask
+    wm withdraw .mask
+    frame .mask.f
+    label .mask.f.label -text "Detector Mask"
+    pack .mask.f.label -in .mask.f -side top
+    for {set i 1} {$i < 20} {incr i} {
+	checkbutton .mask.f.det$i -text Det[format "%02d" $i] \
+		-variable view($i) -command "ShowNewDet sum"
+	pack .mask.f.det$i -in .mask.f -side top
+    }
+    button .mask.dismiss -text "Dismiss" -command HideMaskTable
+    pack .mask.f .mask.dismiss -side top -expand true -fill x
+}
+
+
+proc ApplyNormMon { args } {
+    global view
+
+    if {$view(norm_mon)} {
+	if {!$view(norm_mon_done)} { 
+	    NormalizeMonitor 
+	    ShowNewDet $view(currentdet)
+	}
+    } else {
+	if {$view(norm_mon_done)} {
+	    set view(norm_mon_done) 0
+	    SplitMats
+	    if {$view(norm_smpl)} {NormalizeSample}
+	    ShowNewDet $view(currentdet)
+	}
+    }
+}
+
+proc ApplyNormSmpl { args } {
+    global view
+
+    if {$view(norm_smpl)} {
+	if {!$view(norm_smpl_done)} { 
+	    NormalizeSample 
+	    ShowNewDet $view(currentdet)
+	}
+    } else {
+	if {$view(norm_smpl_done)} {
+	    set view(norm_smpl_done) 0
+	    SplitMats
+	    ShowNewDet $view(currentdet)
+	}
+    }
+}
+
+proc SaveData { } {
+    global xs y ydet detlabel veclen filename comments
+
+    set filename [tk_getSaveFile]
+    if {[string length $filename] == 0} { return } 
+    update
+
+    if [catch {open $filename w} outfile] {
+	PutText "Could not open $filename for writing."
+	return
+    }
+
+    for {set i 0} { $i < $veclen } { incr i } {
+	# write x axis in the actual units we're using for the plot
+	# set xval [expr 1.0 * $i]
+	set xval $xs($i)
+	if { $veclen == 20 } {
+	    if {![catch {set ydet($i)} yval]} {
+		puts $outfile "$xval $yval"
+	    }
+	} else {
+	    if {![catch {set y($i)} yval]} {
+		puts $outfile "$xval $yval"
+	    }
+	}
+    }
+    close $outfile
+}
+
+proc ApplyScale { } {
+    global view
+
+    # xaxis
+    if {$view(xauto)} {
+	.g xaxis configure -min {} -max {}
+    } else {
+	# Check to make sure limits are real numbers
+	if [catch {expr 1.0 * $view(xmin)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(xmin)\"" \
+		error 0 OK
+	    return
+	}
+	if [catch {expr 1.0 * $view(xmax)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(xmax)\"" \
+		error 0 OK
+	    return
+	}
+	.g xaxis configure -min $view(xmin) -max $view(xmax)
+    }
+    
+    # yaxis
+    if {$view(yauto)} {
+	.g yaxis configure -min {} -max {}
+    } else {
+	# Check to make sure limits are real numbers
+	if [catch {expr 1.0 * $view(ymin)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(ymin)\"" \
+		error 0 OK
+	    return
+	}
+	if [catch {expr 1.0 * $view(ymax)}] {
+	    tk_dialog .error ERROR \
+		"Expected floating point number but got \"$view(ymax)\"" \
+		error 0 OK
+	    return
+	}
+	.g yaxis configure -min $view(ymin) -max $view(ymax)
+    }
+}
+
+proc BuildScaleControl { } {
+    global view    
+    toplevel .scale
+    wm withdraw .scale
+
+
+    label .scale.xaxis -text "X axis"
+    radiobutton .scale.xauto -text "Autoscale" \
+	    -variable view(xauto) -value 1 
+    radiobutton .scale.xman  -text "Manual"    \
+	    -variable view(xauto) -value 0 
+    label .scale.xminl -text "Minimum" 
+    label .scale.xmaxl -text "Maximum" 
+    entry .scale.xmine -textvariable view(xmin) -width 10
+    entry .scale.xmaxe -textvariable view(xmax) -width 10
+
+    label .scale.yaxis -text "Y axis"
+    radiobutton .scale.yauto -text "Autoscale" \
+	    -variable view(yauto) -value 1 
+    radiobutton .scale.yman  -text "Manual"    \
+	    -variable view(yauto) -value 0 
+    label .scale.yminl -text "Minimum" 
+    label .scale.ymaxl -text "Maximum" 
+    entry .scale.ymine -textvariable view(ymin) -width 10
+    entry .scale.ymaxe -textvariable view(ymax) -width 10
+    button .scale.dismiss -text "Dismiss" -command HideScaleControl
+    button .scale.apply   -text "Apply"   -command ApplyScale
+
+    grid .scale.xaxis .scale.xauto .scale.xman  -in .scale
+    grid x            .scale.xminl .scale.xmine -in .scale
+    grid x            .scale.xmaxl .scale.xmaxe -in .scale
+
+    grid .scale.yaxis .scale.yauto .scale.yman  -in .scale
+    grid x            .scale.yminl .scale.ymine -in .scale
+    grid x            .scale.ymaxl .scale.ymaxe -in .scale
+    grid .scale.dismiss     x      .scale.apply -in .scale
+    return .scale
+}
+
+proc HideScaleControl { } {
+    wm withdraw .scale
+}
+
+proc ShowScaleControl { } {
+    wm deiconify .scale
+}
+
+proc PrintCmdAccept { } {
+    global printcmd lprcmd
+    set lprcmd $printcmd
+}
+
+proc PrintCmdSetup { } {
+    global printcmd lprcmd
+
+    toplevel .print
+    label .print.l -text "Enter Print Command: "
+    entry .print.e -textvariable printcmd
+    button .print.dismiss -text "Dismiss" -command "destroy .print"
+    button .print.accept  -text "Accept"  -command "PrintCmdAccept"
+    grid .print.l       .print.e      -in .print
+    grid .print.dismiss .print.accept -in .print
+}
+
+proc PrintGraph { } {
+    global .g lprcmd runinfo view
+    set outfile "/tmp/hfbs[pid].ps"
+    if [catch {.g postscript output $outfile}] {
+	PutText "Cannot create postscript output"
+	return
+    }
+
+    set detstring ""
+    switch $view(currentdet) {
+	all { set detstring all }
+	0 { set detstring monitor }
+	sum {
+	    for {set i 0} {$i < 17} {incr i} {
+		if {[string length $detstring] > 0} {
+		    append detstring ","
+		}
+		if { $view($i) } { append detstring $i }
+	    }
+	}
+    }
+
+    set finalfile "/tmp/hfbs[pid]x.ps"
+    set timestring [format "%.2f " $runinfo(tottime)]
+    set f [open $finalfile w]
+    puts $f "%!PS"
+    puts $f "gsave"
+    puts $f "/Times-Roman findfont 14 scalefont setfont"
+    puts $f "792 0 translate 90 rotate"
+    puts $f " 72 720 moveto (Filename:) show"
+    puts $f "144 720 moveto ($runinfo(filename)) show"
+    puts $f " 72 704 moveto (Comments:) show"
+    puts $f "144 704 moveto ($runinfo(comments)) show"
+    puts $f " 72 688 moveto (Mode:) show"
+    puts $f "144 688 moveto ($runinfo(mode)) show"
+    puts $f " 72 672 moveto (Start time:) show"
+    puts $f "144 672 moveto ($runinfo(starttime)) show"
+    puts $f " 72 656 moveto (Live time:) show"
+    puts $f "144 656 moveto ($timestring sec) show"
+    puts $f " 72 640 moveto (Detectors:) show "
+    puts $f "144 640 moveto ($detstring) show"
+    puts $f "grestore"
+    close $f
+    unset f
+
+    if [catch {exec cat $outfile >> $finalfile} result] {
+	PutText $result
+    }
+
+    if [catch {eval exec $lprcmd $finalfile} result] {
+	PutText $result
+    }
+    catch {exec rm -f $outfile} result
+    catch {exec rm -f $finalfile} result
+}
+
+proc RunInfoPanelBuild { parent } {
+    global runinfo 
+    label $parent.flab     -text "Filename:" -anchor w
+    label $parent.clab     -text "Comments:" -anchor w
+    label $parent.mlab     -text "Mode:"     -anchor w
+    label $parent.filename -textvariable runinfo(filename) -width 30 \
+	    -foreground blue -anchor w
+    label $parent.comments -textvariable runinfo(comments) \
+	    -foreground blue -anchor w
+    label $parent.mode     -textvariable runinfo(mode) -foreground blue
+    label $parent.startlab -text "Start:"
+    label $parent.start    -textvariable runinfo(starttime) -foreground blue
+    set runinfo(statwid) [label $parent.curstat  -textvariable runinfo(status)]
+    label $parent.timelab  -text "Time (sec):"
+    label $parent.time     -textvariable runinfo(tottime) -foreground blue
+
+    grid $parent.flab     -row 0 -column 0 -sticky w
+    grid $parent.mlab     -row 1 -column 0 -sticky w
+    grid $parent.clab     -row 2 -column 0 -sticky w
+    grid $parent.filename -row 0 -column 1 -sticky w
+    grid $parent.startlab -row 0 -column 2 -sticky w
+    grid $parent.start    -row 0 -column 3 -sticky w
+    grid $parent.timelab  -row 0 -column 4 -sticky w
+    grid $parent.time     -row 0 -column 5 -sticky w
+    grid $parent.mode     -row 1 -column 1 -sticky w
+    grid $parent.comments -row 2 -column 1 -columnspan 5 -sticky w
+
+    return $parent
+}
+
+
+proc ViewSingle { args } {
+    global view
+    if {[string compare $view(currentdet) single] == 0} {
+	for {set i 1} {$i < 17} {incr i} { 
+	    .g element configure e$i -hide [expr !$view($i)]
+	}
+    } else {
+	ShowNewDet sum
+    }
+}
+
+proc ShowNewDet { i } {
+    global .g total xs y xdet ydet control data view runinfo
+
+    if {[string compare $i "all"] == 0} {
+	if {!$view(integrate_done)} { Integrate }
+	set view(detlabel) "Sum over energy bins"
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 1
+	.g element configure e0 -hide 0
+	for {set i 1} {$i < 17} {incr i} { .g element configure e$i -hide 1}
+	.g element configure e0 -xdata xdet -ydata ydet
+	.g xaxis configure -title "Detector"
+	set view(currentdet) all
+	return 
+    } elseif {[string compare $i "single"] == 0} {
+	set view(detlabel) "Detectors"
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 0
+	switch $runinfo(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {     
+		if {$runinfo(varytemp) } {
+		    .g xaxis configure -title "Temperature (K)"       
+		} else {
+		    .g xaxis configure -title "Time (sec)"
+		}
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+	narray2vec xvec 0 x xs
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	.g element configure e0 -hide 1
+	for {set i 1} {$i < 17} {incr i} {
+	    narray2vec data $i x y$i
+	    .g element configure e${i} -xdata xs -ydata y$i \
+		    -hide [expr !$view($i)]
+	}
+	set view(currentdet) single
+	return
+    } elseif {[string compare $i "sum"] == 0} {
+	set view(detlabel) "Sum over detectors"
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 1
+	.g element configure e0 -hide 0
+	set view(currentdet) $i
+	for {set i 1} {$i < 17} {incr i} { .g element configure e$i -hide 1}
+	set ndets 0
+	for {set i 0} {$i < 17} {incr i} {
+	    lappend mask $view($i)
+	    if {$view($i)} { incr ndets }
+	}
+	data collapse {1 0} $mask hvec
+	if {$ndets > 0} {
+	    hvec vset ndets $ndets
+	    # hvec map {[] /= $ndets;}
+	}
+	narray2vec hvec x y
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	narray2vec xvec 0 x xs
+	.g element configure e0 -xdata xs -ydata y
+	switch $runinfo(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {
+		if {$runinfo(varytemp)} {
+		    .g xaxis configure -title "Temperature (K)"
+		} else {
+		    .g xaxis configure -title "Time (sec)"
+		}
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+    } elseif [regexp {sample(.*)} $i match s_typ] {
+	switch $s_typ {
+	    mon {
+		narray2vec pv 0 x y
+	    }
+	    lo {
+		if {[string compare $runinfo(mode) "pst"] != 0} {
+		    return -code error "ERR:\nNot available in this mode"
+		}
+		narray2vec pv 1 x y
+	    }
+	    hi {
+		if {[string compare $runinfo(mode) "pst"] != 0} {
+		    return -code error "ERR:\nNot available in this mode"
+		}
+		narray2vec pv 5 x y
+	    }
+	    default {
+		return -code error "ERR:\nSampling type not available"
+	    }
+	}
+
+	set view(detlabel) "P(v)"
+	.g configure -title $view(detlabel)
+	set view(currentdet) $i
+	.g legend configure -hide 1
+	.g element configure e0 -hide 0
+	for {set i 1} {$i < 17} {incr i} { .g element configure e$i -hide 1}
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	narray2vec xvec 0 x xs
+	.g element configure e0 -xdata xs -ydata y
+	switch $runinfo(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {	
+		if {$runinfo(varytemp)} {
+		    .g xaxis configure -title "Temperature (K)"
+		} else {
+		    .g xaxis configure -title "Time (sec)"
+		}
+	    }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+    } else {
+	if {$i >= [lindex [data dimensions] 0]} {
+	    PutText "ERR:\nRequested detector out of bounds"
+	    return
+	}
+	set view(currentdet) $i
+	narray2vec data $i x y
+	if {$i == 0} {
+	    set view(detlabel) Monitor
+	} else {
+	    set view(detlabel) [format "Det: %2d" $i]
+	}
+	.g configure -title $view(detlabel)
+	.g legend configure -hide 1
+	for {set j 0} {$j < 17} {incr j} {
+	    .g element configure e$j -hide 1
+	}
+	.g element configure e$i -hide 0
+	if {$view(norm_smpl)} {
+	    .g yaxis configure -title "Rate (Counts/min)"
+	} else {
+	    .g yaxis configure -title "Intensity (Counts)"
+	}
+	narray2vec xvec 0 x xs
+	.g element configure e0 -xdata xs -ydata y
+	switch $runinfo(mode) {
+	    pst {	.g xaxis configure -title "PST Channel"  }
+	    time {      .g xaxis configure -title "Time (usec)"  }
+	    velocity {	.g xaxis configure -title "Energy (ueV)" }
+	    scan {      .g xaxis configure -title "Scan Pt"      }
+	    default {
+		return -code error "ERR:\nBad mode"
+	    }
+	}
+    }
+}
+
+proc PutText { input } {
+    .t configure -text $input
+}
+
+proc AppendText { input } {
+    set displaytext [.t configure -text]
+    if {[string length $displaytext] > 0} {
+	append displaytext "\n"
+    }
+    append displaytext $input
+    .t configure -text $displaytext
+}
+
+# Build GUI >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+#
+set m [frame .mbar -relief raised -borderwidth 2]
+set f [frame .f]
+RunInfoPanelBuild $f
+set g [blt::graph .g]
+set t [label .t -height 2 -font fixed -relief sunken -justify left -anchor nw]
+set b [frame .buttons -relief raised -borderwidth 2]
+set bn [frame $b.norm]
+
+set bnl [label $bn.label -text "Normalization:"]
+set bns [checkbutton $bn.sample -text Sample -variable view(norm_smpl) \
+	-command ApplyNormSmpl ]
+set bnm [checkbutton $bn.monitor -text Monitor -variable view(norm_mon) \
+	-command ApplyNormMon ]
+
+set d [frame .dmask -relief raised -borderwidth 2]
+set dl [label .dmask.l -text "Detectors:"]
+pack $dl -in $d -side left
+for {set i 1} {$i < 17} {incr i} {
+    checkbutton $d.$i -text [format "%02d" $i] -variable view($i) 
+    .g element create e$i -xdata xs -ydata y$i -symbol none \
+	    -color [lindex $colors $i] -label $i -hide 1 
+    trace variable view($i) w ViewSingle
+    pack $d.$i -in $d -side left
+}
+
+.g element create e0 -xdata xs -ydata y -symbol none -hide 0
+.g xaxis configure -title "PST Channel"
+.g yaxis configure -title "Counts"
+.g legend configure -hide 1
+.g postscript configure -landscape 1
+
+set mf [menubutton $m.file    -width 5 -text File    -underline 0 \
+	-menu $m.file.menu]
+set me [menubutton $m.edit    -width 5 -text Edit    -underline 0 \
+	-menu $m.edit.menu]
+set mv [menubutton $m.view    -width 5 -text Plot    -underline 0 \
+	-menu $m.view.menu]
+
+set mfm [menu $mf.menu]
+$mfm add command -label "Open"         -command OpenData
+$mfm add command -label "Save Current" -command SaveData
+$mfm add command -label "Print Setup"  -command PrintCmdSetup
+$mfm add command -label "Print"        -command PrintGraph
+$mfm add command -label "Exit"         -command exit
+
+set mpm [menu $mv.menu]
+$mpm add command -label "Monitor"            -command "ShowNewDet 0"
+$mpm add command -label "Detectors (sum)"    -command "ShowNewDet sum"
+$mpm add command -label "Detectors (single)" -command "ShowNewDet single"
+$mpm add command -label "P(v)"               -command "ShowNewDet samplemon"
+$mpm add separator
+$mpm add command -label "Table"              -command ShowSumTable
+$mpm add command -label "Scale Axes"         -command ShowScaleControl
+
+wm title . "Data Browser"
+pack $m -side top -fill x -anchor nw
+pack $t -side top -fill x -anchor nw
+pack $f -side top -fill both -anchor n
+pack $g -side top -expand true -fill both 
+pack $b -side top -fill x -anchor sw
+pack $d -side top -anchor sw -fill x
+pack $mf $me $mv -side left -in $m
+pack $bn -side left -in $b
+pack $bnl $bns $bnm -side left -in $bn
+
+#
+# Last minute initializations, just to get the ball rolling
+Blt_ZoomStack .g
+BuildSumTable
+BuildMaskTable
+BuildScaleControl
+
+if {[llength $argv] > 0} {
+    tkwait visibility .
+    update
+    puts "Opening [lindex $argv 0]"
+    if [catch {OpenData [lindex $argv 0]} result] {
+	PutText "Unable to open [lindex $argv 0]"
+    }
+} else {
+    if [catch {OpenData} result] {
+	PutText "Unable to open data file"
+    }
+}
+
+

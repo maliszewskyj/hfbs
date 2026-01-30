@@ -1,0 +1,4 @@
+17.02.20, ct: 
+Remote firmware check adapted to the current version of the 3104 firmware version 
+Driver: sis3100rem_init.c
+	MAX_FV_4 2 -> MAX_FV_4 3

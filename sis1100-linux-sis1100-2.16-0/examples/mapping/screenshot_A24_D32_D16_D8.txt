@@ -1,0 +1,84 @@
+[root@localhost mapping_2]# ./sis1100_map_example_a24_D32_D16_D8
+
+write with A24/D32, read with A24/D32, A24/D16, A24/D8
+
+vme write_d32 0x12345678
+vme write_d32 0x11223344
+vme write_d32 0x55667788
+vme write_d32 0x99aabbcc
+
+vme read_d32 0x12345678
+vme read_d32 0x11223344
+vme read_d32 0x55667788
+vme read_d32 0x99aabbcc
+
+vme read_d16 0x1234
+vme read_d16 0x5678
+vme read_d16 0x1122
+vme read_d16 0x3344
+vme read_d16 0x5566
+vme read_d16 0x7788
+vme read_d16 0x99aa
+vme read_d16 0xbbcc
+
+vme read_d8 0x12
+vme read_d8 0x34
+vme read_d8 0x56
+vme read_d8 0x78
+vme read_d8 0x11
+vme read_d8 0x22
+vme read_d8 0x33
+vme read_d8 0x44
+vme read_d8 0x55
+vme read_d8 0x66
+vme read_d8 0x77
+vme read_d8 0x88
+vme read_d8 0x99
+vme read_d8 0xaa
+vme read_d8 0xbb
+vme read_d8 0xcc
+
+
+
+write with A24/D16, read with A24/D32
+
+vme write_d16 0x0011
+vme write_d16 0x2233
+vme write_d16 0x4455
+vme write_d16 0x6677
+vme write_d16 0x8899
+vme write_d16 0xaabb
+vme write_d16 0xccdd
+vme write_d16 0xeeff
+
+vme read_d32 0x00112233
+vme read_d32 0x44556677
+vme read_d32 0x8899aabb
+vme read_d32 0xccddeeff
+
+
+write with A24/D8, read with A24/D32
+
+vme write_d8 0x00
+vme write_d8 0x01
+vme write_d8 0x02
+vme write_d8 0x03
+vme write_d8 0x04
+vme write_d8 0x05
+vme write_d8 0x06
+vme write_d8 0x07
+vme write_d8 0x08
+vme write_d8 0x09
+vme write_d8 0x0a
+vme write_d8 0x0b
+vme write_d8 0x0c
+vme write_d8 0x0d
+vme write_d8 0x0e
+vme write_d8 0x0f
+
+vme read_d32 0x00010203
+vme read_d32 0x04050607
+vme read_d32 0x08090a0b
+vme read_d32 0x0c0d0e0f
+
+[root@localhost mapping_2]#

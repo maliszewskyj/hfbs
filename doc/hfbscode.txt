@@ -1,0 +1,186 @@
+    $Id: hfbscode.txt,v 1.1.1.1 1999/09/20 14:32:07 nickm Exp $
+
+	    ----------------Register Usage----------------
+
+N0	number of detector velocity channels
+
+R0	Scratch register for detector velocity offset
+R1	A_SEQ_STAT    
+R2	A_SEQ_START
+R3	A_COM_RESET
+R4	A_COM_FIFO
+R5	A_IRQ_REG
+
+D0.L	IRQ FLAG
+D1.L	Scratch register for ECLOUT
+D2.L	Scratch register for histogramming
+D3.L	Scratch register for histogramming
+D4.L
+D5.L
+D6.L
+D7.L	Read mask for latch
+D8.L
+D9.L
+
+D0.M	FIFO VME STR7201
+D1.M	FIFO VME STR7137
+D2.M	VME ADDR VADM1
+D3.M	VME ADDR VADM2
+D4.M	mode STR7201 (BLT32)
+D5.M	mode STR7137 (D32)
+D6.M	write mode VADMs
+D7.M	read mode VADMs
+D8.M	data for start VADM conversion
+D9.M	high 16 bits of latch and scaler addresses
+
+D0.H
+D1.H
+D2.H
+D3.H
+D4.H
+D5.H
+D6.H	ring buffer write pointer
+D7.H	ring buffer read pointer (group1)
+D8.H	ring buffer read pointer (group2)
+D9.H	ring buffer read pointer (group3)
+
+	     ----------------Data objects----------------
+
+
+Ring buffer    - contains values of velocity measured prior to reading events
+               - 4 pointers: 1 write pointer
+			     3 read pointers : high angle detectors
+                                               low angle detectors
+                                               beam monitor
+               - write pointer increment depends on current value of velocity
+               - read pointers maintain a fixed relationship with each other
+
+Lookup tables  - ring buffer write pointer offset - indexed by velocity and pos
+		   two parts: one for positive position
+                              one for negative position
+               - detector mask lookup table       - indexed by PST position
+
+Data histogram - two halves: event counting & interval counting
+                    allows for recording rate information: event/interval
+               - In each half, 20 detectors separated in three groups:
+                    high angle detectors
+                    low angle detectors
+                    beam monitor
+               - 1024 velocity channels per detector
+               - velocity channel 0 is reserved for MASK_EVENT
+
+       ----------------Standard mode pseudocode----------------
+
+A few definitions...
+
+WRITE_PTR       : ring buffer write pointer
+READ_PTR        : current ring buffer read pointer
+READ_PTR_GROUP1 : detector group1 ring buffer read pointer
+READ_PTR_GROUP2 : detector group2 ring buffer read pointer
+READ_PTR_GROUP3 : detector group3 ring buffer read pointer
+NBUF            : number of positions (length) of ring buffer
+NDET_GROUP1     : number of detectors in group1
+NDET_GROUP2     : number of detectors in group2
+NDET_GROUP3     : number of detectors in group3
+DMASK           : detector enable mask obtained from lookup table
+DCOUNTS         : array of detector counts read from scaler
+DCOUNT_PTR      : pointer to current element of DCOUNT array
+HIST            : histogram consisting of two parts (interval ctr & hit ctr)
+HIST_WRITE      : histogram write pointer
+MASK_EVENT      : "invalid" velocity value - velocity channel 0
+BAD_EVENT_CTR   : counts "bad" events
+
+Begin
+	# Initialization
+	Clear I/O FIFOs
+	Initialize WRITE_PTR
+	Initialize READ_PTR_GROUP1
+	Initialize READ_PTR_GROUP2
+	Initialize READ_PTR_GROUP3
+	Initialize BAD_EVENT_CTR
+	Start External Clock
+	Start first ADC conversions
+
+	# Fill ring buffer before starting to collect data
+	Loop NBUF
+		Read velocity and position ADCs
+		Start next ADC conversions
+		Lookup flight time WRITE_PTR_OFFSET (2, 1, 0)
+		Increment WRITE_PTR by WRITE_PTR_OFFSET
+		Write velocity to ring buffer at (WRITE_PTR) and (WRITE_PTR+1)
+	Endloop
+
+	# Start reading from a clean slate
+	Clear latch and scaler input FIFOs
+
+bloop_:	Loop (forever)
+		# Synchronization with external clock
+		If IRQA set # We missed the last external clock pulse
+			Increment BAD_EVENT_CTR
+			Start next ADC conversions			
+			Read PST position
+			Read detector counts
+			# Ignore flight time offsets
+			Increment WRITE_PTR by 1
+			Write MASK_EVENT to ring buffer at 
+				(WRITE_PTR) and (WRITE_PTR+1)
+			Increment READ_PTR_GROUP1
+			Increment READ_PTR_GROUP2
+			Increment READ_PTR_GROUP3
+			Jump to bloop_
+		End if
+		Wait for IRQA
+		# End synchronization step
+
+		Read velocity and position ADCs
+		Start next ADC conversions
+		Lookup flight time WRITE_PTR_OFFSET (2, 1, 0)
+		Increment Write_Ptr by WRITE_PTR_OFFSET
+		Write velocity to ring buffer at (WRITE_PTR) and (WRITE_PTR+1)
+
+		Read PST position
+		Lookup detector enable mask (DMASK) indexed by PST position
+		Read detector counts (DCOUNTS) into an array
+
+		Initialize DCOUNT_PTR = &DCOUNT
+hloop_:		READ_PTR = READ_PTR_GROUP1
+		Loop NDET_GROUP1
+			If DMASK LSB = 1
+				HIST_WRITE = *READ_PTR
+				Increment HIST(DET,EVENT_CTR,HIST_WRITE)
+				Increment HIST(DET,HIT_CTR,HIST_WRITE) by 
+					*DCOUNT_PTR
+			Endif
+			Rshift DMASK
+			Increment DCOUNT_PTR
+		Endloop (NDET_GROUP1)
+
+		READ_PTR = READ_PTR_GROUP2
+		Loop NDET_GROUP2
+			If DMASK LSB = 1
+				HIST_WRITE = *READ_PTR
+				Increment HIST(DET,EVENT_CTR,HIST_WRITE)
+				Increment HIST(DET,HIT_CTR,HIST_WRITE) by 
+					*DCOUNT_PTR
+			Endif
+			Rshift DMASK
+			Increment DCOUNT_PTR
+		Endloop (NDET_GROUP2)		
+
+		READ_PTR = READ_PTR_GROUP3
+		Loop NDET_GROUP3
+			If DMASK LSB = 1
+				HIST_WRITE = *READ_PTR
+				Increment HIST(DET,EVENT_CTR,HIST_WRITE)
+				Increment HIST(DET,HIT_CTR,HIST_WRITE) by 
+					*DCOUNT_PTR
+			Endif
+			Rshift DMASK
+			Increment DCOUNT_PTR
+		Endloop (NDET_GROUP3)
+
+		Increment READ_PTR_GROUP1
+		Increment READ_PTR_GROUP2
+		Increment READ_PTR_GROUP3
+	Endloop (forever)
+End

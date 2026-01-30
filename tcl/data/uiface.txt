@@ -1,0 +1,62 @@
+ Type RM to Reveal Menu
+ Select an option (C/V/B/P/WL/L/W/M/Q/S/AWL/SC/ASC/X/A/CFG/HM/RM/RSC/CC) 
+           (<CR> to exit):  rm
+ 
+C:   Read choppers                      W: Write to chopper 
+V:   Read vacuum gauges                 M: Monitor (Submon)
+B:   Read choppers and vacuum gauges    Q: Quit monitoring 
+P:   Read Vacuum gauge setpoints        S: Status
+WL:  Set wavelength                   AWL: Abort wavelength
+SC:  Count with scalers               ASC: Abort scaler count
+L:   Lock/Unlock VGauge front panel     X: Shutdown 
+CFG: Examine/change config params       A: Abort Shutdown
+HM:  Hide Menu                         RM: Reveal Menu 
+RSC: Request latest scaler counts      CC: Read chop. Show All
+ Select an option (C/V/B/P/WL/L/W/M/Q/S/AWL/SC/ASC/X/A/CFG/HM/RM/RSC/CC) 
+           (<CR> to exit):  
+
+
+
+MS: Master speed 
+DF: DF/DT 
+GN: Pulse Generators 
+SR: Speed Ratio 
+NP: Nominal Phase      
+PW: Phase Window   
+NC: Nominal Current
+
+Select an option (MS/DF/GN/SR/NP/PW/NC) (<CR> to return to main MENU): 
+
+
+Enter master speed or <CR> to return to main MENU: 
+
+
+
+Enter wavelength (A) or <CR> to return to main MENU: 
+
+
+
+
+ Enter only those choppers which should have Phase Window written:
+  (Enter * after list if values differ from chopper to chopper)
+Enter choppers: (ex: 135 or 0 or <CR> for all now in use ):    
+
+Enter phase window (0.01 - 1.00) or <CR> to return to main MENU:
+
+
+*************Read both:
+ 
+Enter choppers: (ex: 135 or 0 or <CR> for all now in use ):    
+Enter Gauges: (ex: 13 or 0 or <CR> for all now in use ): 
+  Number of times to read (-1: until phased, <CR>: indefinite): 1
+19-NOV-1997 18:18:35.56        Master Speed:  8000     df/dt: 0.120
+!DISK DC PG SP MB SPEED RATIO AMPS  PHASE WIND  MAXD  MNDEV OUT DPHASE S CW SW
+1  4B On On    On  8000   1/1 0.80  90.00 0.02  0.01  0.003   0   0.00    0 23
+2  4A On On    On  8000   1/1 0.81 269.99 0.02  0.01  0.003   0  -0.01    0 23
+3  3A On On    On  8000   1/1 0.80 270.00 0.02  0.01  0.003   0   0.00    0 23
+4  2B On On    On  8000   1/1 0.80 270.00 0.02  0.01  0.003   0   0.00    0 23
+5  2A On On    On  8000   1/1 0.80 129.00 0.02  0.01  0.003   0   0.00    0 23
+6  1B On On    On  8000   1/1 0.80 327.00 0.02  0.01  0.002   0   0.00    0 23
+7  1A On On    On  8000   1/1 0.81 288.00 0.02  0.01  0.003   0   0.00    0 23
+                          VG2          VG3          VG4      
+                          0.0          0.0          0.2      

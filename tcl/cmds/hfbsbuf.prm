@@ -1,0 +1,35 @@
+set hfbsbuf(0,comments) "test of doppler/vibrometer 12Hz"
+set hfbsbuf(0,user) "Meyer"
+set hfbsbuf(0,ncycles) 999
+set hfbsbuf(0,cyctime) 3600
+set hfbsbuf(0,t0) 300.0
+set hfbsbuf(0,dt) 0.0
+set hfbsbuf(0,mode) standard
+set hfbsbuf(1,comments) "vanadium, air, pst 4738, doppler 12"
+set hfbsbuf(1,user) "Meyer"
+set hfbsbuf(1,ncycles) 999
+set hfbsbuf(1,cyctime) 600
+set hfbsbuf(1,t0) 300.0
+set hfbsbuf(1,dt) 0.0
+set hfbsbuf(1,mode) teach
+set hfbsbuf(2,comments) "empty"
+set hfbsbuf(2,user) ""
+set hfbsbuf(2,ncycles) 1
+set hfbsbuf(2,cyctime) 1200
+set hfbsbuf(2,t0) 300.0
+set hfbsbuf(2,dt) 0.0
+set hfbsbuf(2,mode) standard
+set hfbsbuf(3,comments) "test"
+set hfbsbuf(3,user) "Meyer"
+set hfbsbuf(3,ncycles) 1
+set hfbsbuf(3,cyctime) 600
+set hfbsbuf(3,t0) 300.0
+set hfbsbuf(3,dt) 0.0
+set hfbsbuf(3,mode) standard
+set hfbsbuf(4,comments) "empty"
+set hfbsbuf(4,user) ""
+set hfbsbuf(4,ncycles) 1
+set hfbsbuf(4,cyctime) 600
+set hfbsbuf(4,t0) 300.0
+set hfbsbuf(4,dt) 0.0
+set hfbsbuf(4,mode) standard

@@ -1,0 +1,28 @@
+#!/usr/bin/tclsh
+
+package require dp
+set r [dp_MakeRPCClient localhost 51330]
+
+proc Launch { args } {
+    global r
+    set cmd "dp_RPC $r "
+    foreach c $args {
+	append cmd "$c "
+    }
+    return [eval $cmd]
+}
+
+proc PromptUser { } {
+    puts -nonewline "HFBS> "
+    flush stdout
+}
+
+
+PromptUser
+while { [gets stdin cmd] != 0 } {
+    if [regexp exit [string tolower $cmd]] { exit }
+    if [regexp quit [string tolower $cmd]] { exit }
+    catch {Launch $cmd} result
+    puts $result
+    PromptUser
+}

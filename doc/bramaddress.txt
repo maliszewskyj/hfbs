@@ -1,0 +1,25 @@
+BRAM Histogram Addressing 
+
+20000 Hit Monitor Counter
+20800 Interval Monitor Counter
+21000 Hit LA 1
+21800 Hit LA 2
+22000 Hit LA 3
+22800 Hit LA 4
+23000 Interval LA 
+23800 Hit HA 1
+24000 Hit HA 2
+24800 Hit HA 3
+25000 Hit HA 4
+25800 Hit HA 5
+26000 Hit HA 6
+26800 Hit HA 7
+27000 Hit HA 8
+27800 Hit HA 9
+28000 Hit HA 10
+28800 Hit HA 11
+29000 Hit HA 12
+29800 Hit HA 13
+2A000 Hit HA 14
+2A800 Hit HA 15
+2B000 Interval HA

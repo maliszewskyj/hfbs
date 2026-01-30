@@ -1,0 +1,36 @@
+#!/usr/bin/tclsh
+
+package require dp
+set rpc_port 51330
+
+#<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# RPC stuff
+proc ClientLogin { file addr } {
+    # First check for localhost
+    if {[string match $addr 127.0.0.1] == 1} { return }
+    # Now restrict to our subnet
+    if {[regexp {129\.6\.} $addr match] != 1} {
+	error "Client not authorized"
+    }    
+}
+
+proc CheckCliCmd { input } {
+    set args [split $input]
+    set cmd  [lindex $args 0]
+    puts "cmd = $cmd"
+#    switch $cmd {
+#	SubScribe return;
+#	puts      return;
+#	set       return;
+#	array     return;
+#	info      return;
+#    }
+#    return -code break
+     # For now, allow all commands
+     return
+}
+
+if [catch {dp_MakeRPCServer $rpc_port ClientLogin CheckCliCmd} r] {
+    puts stderr "$r"
+    exit
+}

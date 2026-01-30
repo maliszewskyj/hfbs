@@ -1,0 +1,94 @@
+:file_name
+:file_time
+:file_history
+:NEXUS_version
+:owner_name
+:owner_mail
+:owner_email
+V NXentry->run1
+  start_time                    { Starting time of data collection (ISO-8601)}
+  end_time                      { File write time of data collection }
+  duration                      { total collection time }
+  title                         { Title/general comments }
+  program_name                  { Data acquisition program: spec/ICP/etc...}
+  intent                        { Intent of run: data/background/calibration}
+  plot_time                     { Type of data: line, 3D, contour, image }
+  V NXinstrument->FCS
+    location                    { Home institution of instrument }
+    description                 { Bibliographic reference to instrument }
+    type                        { Description of Instrument Type }
+    local_contact               { Name of collaborating instrument scientist }
+    V NXsource->NBSR
+      name                      { Institution }
+      type                      { x-ray/neutron/reactor/synchrotron }
+      power                     { source power }
+    v NXsource
+    V NXvelocity_selector->selector
+      make                      { manufacturer and model }
+      delta_lambda_over_lambda  { selector resolution }
+      distance                  { distance from sample position }
+      speed                     { operating speed at time of measurement }
+      wavelength                { operating wavelength at time of measurement }
+    v NXvelocity_selector
+    V NXpst_chopper->chopper
+      distance
+      type
+      crystal
+      d-spacing
+      radius
+      takeoff_angle
+      frequency
+    v NXpst_chopper
+    V NXdoppler_drive->doppler
+      distance
+      crystal
+      d-spacing
+      peak_velocity
+      delta_d                            { maximum displacement }
+    v NXdoppler_drive
+    V NXmonitor->beam_monitor
+      distance
+      monitor_size
+      monitor_transmission
+      monitor_efficiency                 { functional form } 
+    v NXmonitor
+    V NXanalyzer
+      distance
+      analyzer_crystal
+      analyzer_d-spacing
+      analyzer_delta_d_over_d
+      analyzer_reflectivity
+      analyzer_focussing                  
+      analyzer_size/array[number]        { store height and width separately? }
+    v NXanalyzer
+    V NXdetector->detector
+      detector_width/array[number]       
+      detector_height/array[number]
+      detector_shape                     { cross-sectional shape of detector }
+      detector_efficiency                { functional form for one detector  }
+      detector_flightpath/array[number]  { distance from sample to detector  }
+      detector_angles/array[number]      { angular position of detector      }
+      detector_q/array[number]           { q values associated w/ detectors  }
+    v NXdetector
+  v NXinstrument
+  V NXsample->sample_name
+    sample_description
+    sample_mass
+    sample_form
+    sample_shape
+    sample_cross_section_scattering
+    sample_cross_section_absorption
+    sample_orientation
+  v NXsample
+  V NXanalysis->analysis             { Perhaps default analysis options? }
+  v NXanalysis->analysis
+  V NXdata->data
+    wavelength                       { Wavelength during data collection }
+    sample_temperature               { sample temperature }
+    monitor_counts                   { total number of monitor counts }
+    live_time                        { total time for data collection }
+    energy/array[ntime]              { energy associated w/ time channel }
+    intensity/array[ndet][ntime]     { data histogram  }
+    normalize/array[ndet][ntime]     { number of samples / time interval }
+  v NXdata->data
+v NXentry->run1

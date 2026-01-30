@@ -1,0 +1,126 @@
+#!/usr/bin/perl
+# $Id: gen_ftoff,v 1.1.1.1 1999/09/20 14:32:10 nickm Exp $
+#
+# Calculate flight time offset correction
+#       All distances are reported in meters
+#       All times are reported in seconds
+
+$usage = 
+ "Usage: gen_ftoff [-m] [-M <d_ms>] [-S <d_sm>] [-s <d_sad>] [-v <v_bragg>]\n".
+ "   -o                            calculate for OR ADCs (def: ICS)\n".
+ "   -m                            calculate table for monitor\n".
+ "   -M <d_ms>                     monochromator-sample distance\n".
+ "   -S <d_sm>                     sample-monitor distance\n".
+ "   -s <d_sad>                    sample-analyser-detector distance\n".
+ "   -v <v_bragg>                  velocity of incident neutrons\n".
+ "   -z                            write zeros for every element\n".
+ "   -t <time_bin>                 time channel width (in microsec)\n".
+ "   -b                            write output in binary (big-endian)\n".
+ "   specify distances in meters and velocities in meters/sec\n";
+
+require "getopts.pl";
+if (!&Getopts('dmM:s:S:v:bzot:')) {
+  print $usage;
+  exit;
+}
+
+$debug = 0;
+$detmon = 1; # detectors if 1, monitor if 0
+$v_bragg = 630.825;
+$d_ms  = 2.246;
+$d_sad = 4.121;
+$d_sm  = 2.011;
+$t_bin = 30e-6;
+$maxdrange = 0.082;
+$d_off=0;
+$v_off=0;
+$ics_offset=5; # Correct for slight offset in voltage read using ICS ADC
+
+# Process command line options
+if ($opt_m) { $detmon = 0; } # Do calculation for monitor
+if ($opt_M) { $d_ms   = 1.0 * $opt_M; } 
+if ($opt_S) { $d_sm   = 1.0 * $opt_S; }
+if ($opt_s) { $d_sad  = 1.0 * $opt_s; }
+if ($opt_v) { $v_bragg= 1.0 * $opt_v; }
+if ($opt_t) { $t_bin  = 1.0e-6 * $opt_t; }
+if ($opt_d) { $debug = 1; }
+
+if ($detmon) { 
+    $d_fix = $d_ms + $d_sad; 
+    $t_flight = ($d_ms + $d_sad) / $v_bragg;
+} else {
+    $d_fix = $d_ms + $d_sm;
+    $t_flight = ($d_ms + $d_sm) / $v_bragg;
+}
+$t_fix = int( $t_flight / $t_bin );
+$t_elastic = $d_fix / $v_bragg;
+
+$d_scale = (0.082 * (10.0/8.0)) / 1024;
+$v_scale = 20.0 / 2048;
+
+if ($opt_z) {
+    for ($i=0;$i<256;$i++) {
+	for ($j=0;$j<256;$j++) {
+	    if ($opt_b) {
+		$raw = pack "N",0;
+		print $raw;
+	    } else {
+		print "0\n";
+	    } 
+	}
+    }
+    exit;
+}
+
+if ($debug) { 
+    print "d_sad     = $d_sad\n";
+    print "d_sm      = $d_sm\n";
+    print "d_fix     = $d_fix\n";
+    print "t_flight  = $t_flight\n";
+    print "t_fix     = $t_fix\n";
+    print "t_elastic = $t_elastic\n";
+}
+
+for($i=0;$i<256;$i++) {
+    if ($opt_o) {
+	$v_idx = (($i<<3) - 1024);
+    } else {
+	$v_idx = &CalcICSVal($i<<3) - 1024;
+    }
+    $delta_v = $v_idx * $v_scale;
+    for ($j=0;$j<256;$j++) {
+	if ($opt_o) {
+	    $d_idx = (($j<<3) - 1024);
+	} else {
+	    $d_idx = &CalcICSVal($j<<3) - 1024;
+	}
+	$delta_d = $d_idx * $d_scale;
+	$t_flight = ($d_fix - $delta_d) / ($v_bragg + $delta_v);
+	$offset = int(($t_flight - $t_elastic) / $t_bin);
+	if ($opt_b) {
+	    $binval = pack "N",$offset;
+	    print $binval;
+	} else {
+	    if ($debug) { printf "%3d %3d ",$i,$j;}
+	    printf " %d \n",$offset;
+	} 
+    }
+}
+
+
+sub CalcICSVal {
+    local($i) = @_;
+    local($val);
+    if ($i & 0x400) {
+	$val = - ( ~$i & 0x7ff );
+	$val -= 1;
+    } else {
+	$val = $i;
+    }
+    $val += $ics_offset;
+    $val += 0x400;
+    if ($val > 2047) { $val = 2047; }
+    if ($val < 0)    { $val = 0; }
+    return $val;
+}
+

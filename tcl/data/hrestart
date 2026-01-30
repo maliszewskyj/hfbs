@@ -1,0 +1,31 @@
+#!/usr/bin/expect
+set prompt "OS-9>>"
+set uname  "super"
+set upass  "user"
+set cmd "hfbsdaq<>>>/nil &"
+log_user 0
+
+set tpid [spawn telnet hvme]
+expect "name?:"
+send "$uname\r"
+expect "assword:"
+send "$upass\r"
+expect $prompt
+send "procs\r"
+expect $prompt
+set pid 0
+foreach p [split $expect_out(buffer) "\r\n"] {
+    if {[regexp {hfbsdaq} $p]} {
+	set pidparts [split [string trimleft $p]]
+	set pid [lindex $pidparts 0]
+    }
+}
+
+if {$pid > 0} {
+    puts "Stopping process $pid"
+    send "kill $pid\r"
+    expect $prompt
+    puts "Restarting hfbsdaq"
+    send "$cmd\r"
+    expect $prompt
+}
