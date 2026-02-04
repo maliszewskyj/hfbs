@@ -274,6 +274,9 @@ proc PLCRecover { } {
     return $action(plcdown)
 }
 
+# Set PST speed in RPM
+#
+# Design speed = 4730 rpm
 proc PSTSpeed { speed } {
     global fd logs hdw time
 
@@ -284,7 +287,7 @@ proc PSTSpeed { speed } {
 
     putmsg $logs(corelog) "Setting PST speed to $speed"
     
-    if [catch {WriteRegister pst_speed $speed} result] {
+    if [catch {WriteRegister pst_setp $speed} result] {
 	return -code error $result
     }
 
@@ -315,11 +318,11 @@ proc PSTDisable { } {
     return "OK:\nPST disabled"
 }
 
-# Set Doppler speed in Hz. 
-# The ad-hoc table of monochromator velocity/frequency is listed below:
+# Set Doppler cam speed in RPM
 #
-#   Speed(m/s)  Frequency(Hz)
-#     1.0           8.30
+# Old table 
+#   Speed(m/s)  Frequency(Hz)  RPM
+#     1.0           8.30       
 #     2.0          16.64
 #     3.0          24.97
 #     4.0          33.30
@@ -337,7 +340,7 @@ proc DopplerSpeed { speed {silent 0}} {
 		"ERR:\nRequested Doppler speed exceeds current limit"
     }
 
-    if [catch {WriteRegister doppler_speed $speed} result] {
+    if [catch {WriteRegister doppler_setp $speed} result] {
 	return -code error $result
     }
 

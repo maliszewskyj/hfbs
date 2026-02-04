@@ -23,6 +23,7 @@ static char rcsid[] = "$Id: dsplink.c,v 1.6 2008/05/05 13:58:34 nickm Exp $";
 #include <vsc16.h>
 
 #include "dsplink.h"            /* Function prototypes */
+#include "dspload.h"
 #define TRACE(x...) { printf( x ); }
 
 #define memBase 0x00000000	/* base of DSP BRAM     */

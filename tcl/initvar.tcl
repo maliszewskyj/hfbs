@@ -44,7 +44,6 @@ set hdw(pst_speed,current)          -1
 set hdw(vac,last)                   -1
 set hdw(vac,current)                -1
 
-
 # contact (logic) inputs
 set hdw(doppler_enable,current)      0 ;# C120 Doppler software enable
 set hdw(doppler_oilpressure,current) 0 ;# C20  Oil pressure switch
@@ -54,15 +53,6 @@ set hdw(pst_enable,current)          0 ;# C140 PST software enable
 set hdw(pst_vibration,current)       0 ;# C23  Drive fault
 set hdw(pst_drivefault,current)      0 ;# C24  Bearing damage
 set hdw(vac_hv_en,current)           0 ;# C150 Vacuum HV enable
-
-set hdw(doppler_enable,coil)         23
-set hdw(pst_enable,coil)             27
-set hdw(vac_hv_en,coil)              26
-set hdw(doppler_oilpressure,coil)    19
-set hdw(doppler_oiltemp,coil)        20
-set hdw(doppler_vibration,coil)      21
-set hdw(pst_vibration,coil)          22
-
 
 set hdw(doppler_t_in,range)        200.0
 set hdw(doppler_t_out,range)       200.0
@@ -102,32 +92,33 @@ set hdw(vac,units)                   "torr"
 # we can truncate the address to "9"
 #
 #
-set hdw(doppler_t_in,reg)           9
-set hdw(doppler_t_out,reg)         13
-set hdw(doppler_t_bsh,reg)         19
-set hdw(doppler_p_in,reg)          11
-set hdw(doppler_p_out,reg)         15
-set hdw(doppler_flow,reg)          17
-set hdw(doppler_hrate,reg)         47
-set hdw(pst_flow,reg)              25
-set hdw(pst_temp,reg)              23
-set hdw(pst_hrate,reg)             45
-set hdw(vac,reg)                   27
-set hdw(doppler_speed,reg)         33
-set hdw(pst_speed,reg)             31
-
+set hdw(doppler_t_in,reg)          1044
+set hdw(doppler_t_out,reg)         1047
+set hdw(doppler_t_bsh,reg)         1055
+set hdw(doppler_p_in,reg)          1041
+set hdw(doppler_p_out,reg)         1042
+set hdw(doppler_flow,reg)          1053
+set hdw(doppler_hrate,reg)         1001 ;# This _was_ a speed reading originally
+set hdw(pst_flow,reg)              1063
+set hdw(pst_temp,reg)              1058
+set hdw(pst_hrate,reg)             1013 ;# This _was_ also a speed reading
+set hdw(vac,reg)                   1029
+set hdw(doppler_speed,reg)         1001
+set hdw(doppler_setp,reg)          2001
+set hdw(pst_speed,reg)             1013
+set hdw(pst_setp,reg)              2009
 
 # Software enables for doppler & PST; specify in hexadecimal
 #
 
-set hdw(doppler_enable,coil)         23
-set hdw(pst_enable,coil)             27
-set hdw(vac_hv_en,coil)              26
-set hdw(doppler_oilpressure,coil)    19
-set hdw(doppler_oiltemp,coil)        20
-set hdw(doppler_vibration,coil)      21
-set hdw(pst_vibration,coil)          22
-set hdw(clear_flags,coil)            28
+set hdw(doppler_enable,coil)       2001 ;# Doppler Enable Request
+set hdw(pst_enable,coil)           2003 ;# PST Enable Request
+set hdw(vac_hv_en,coil)            2002 ;# HV Enable Request
+set hdw(doppler_oilpressure,coil)  1026 ;# Doppler Oil Pressure Flag
+set hdw(doppler_oiltemp,coil)      1032 ;# Doppler Oil  Temp Flag
+set hdw(doppler_vibration,coil)    1041 ;# Doppler Vibration Flag
+set hdw(pst_vibration,coil)        1046 ;# PST Vibration Flag
+set hdw(clear_flags,coil)          2004 ;# Clear All Flags Request
 
 # Build a list of known devices/measured quantities
 # 
@@ -137,7 +128,8 @@ set hdw(plc,registers)         {doppler_t_in doppler_t_out \
 				doppler_hrate \
                                 pst_flow pst_temp \
 			        pst_hrate vac \
-				    doppler_speed pst_speed}
+				doppler_speed pst_speed \
+				doppler_setp pst_setp }
 set hdw(plc,coils)             {doppler_enable doppler_oilpressure \
                                 doppler_oiltemp doppler_vibration \
                                 pst_enable pst_vibration \

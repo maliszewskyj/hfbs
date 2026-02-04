@@ -1,9 +1,9 @@
 
-AOBJ = acquire.o dsplink.o
+AOBJ = acquire.o dsplink.o dspload.o read_dsp_coff.c read_dsp_ldr.c read_dsp_raw.c
 HOBJ = sharehist.o
 MOBJ = mtxutil.o
 #LIBS = -lefence
-SISDIR = /usr/local/hfbs/sis1100
+SISDIR = ../sis1100-linux-sis1100-2.16-0
 TCLDIR = /usr/include/tcl8.6
 INC = -I$(SISDIR)/dev/pci/ -I$(SISDIR)/sis3100_calls -I$(SISDIR)/sis3100_calls/header -I$(TCLDIR) -I/usr/local/hfbs/include -I.
 CFLAGS=-g -fPIC -Wall -DCLIENT -I/usr/local/include $(INC)
