@@ -33,6 +33,8 @@ set hdw(doppler_speed,last)         -1
 set hdw(doppler_speed,current)      -1
 set hdw(doppler_hrate,last)         -1
 set hdw(doppler_hrate,current)      -1
+set hdw(doppler_setp,last)          -1
+set hdw(doppler_setp,current)       -1
 set hdw(pst_flow,last)              -1
 set hdw(pst_flow,current)           -1
 set hdw(pst_temp,last)              -1
@@ -41,6 +43,8 @@ set hdw(pst_hrate,last)             -1
 set hdw(pst_hrate,current)          -1
 set hdw(pst_speed,last)             -1
 set hdw(pst_speed,current)          -1
+set hdw(pst_setp,last)              -1
+set hdw(pst_setp,current)           -1
 set hdw(vac,last)                   -1
 set hdw(vac,current)                -1
 
@@ -92,7 +96,7 @@ set hdw(vac,units)                   "torr"
 # we can truncate the address to "9"
 #
 #
-set hdw(doppler_t_in,reg)          1044
+set hdw(doppler_t_in,reg)          1045
 set hdw(doppler_t_out,reg)         1047
 set hdw(doppler_t_bsh,reg)         1055
 set hdw(doppler_p_in,reg)          1041
@@ -100,7 +104,7 @@ set hdw(doppler_p_out,reg)         1042
 set hdw(doppler_flow,reg)          1053
 set hdw(doppler_hrate,reg)         1001 ;# This _was_ a speed reading originally
 set hdw(pst_flow,reg)              1063
-set hdw(pst_temp,reg)              1058
+set hdw(pst_temp,reg)              1059
 set hdw(pst_hrate,reg)             1013 ;# This _was_ also a speed reading
 set hdw(vac,reg)                   1029
 set hdw(doppler_speed,reg)         1001

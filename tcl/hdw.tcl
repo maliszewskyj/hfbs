@@ -229,6 +229,9 @@ proc ReadHdw { } {
     # Note: Really should include facility for retrying communications
     # 
     foreach i $hdw(plc,registers) {
+	if {![info exists $hdw($i,current)]} {
+	    set hdw($i,current) -1
+	}
 	set hdw($i,last) $hdw($i,current)
 	if [catch {ReadRegister $i} result] {
 	    set hdw($i,current) -1.0
@@ -250,6 +253,9 @@ proc ReadCoils { } {
     global fd logs hdw time action
 
     foreach i $hdw(plc,coils) {
+	if {![info exists $hdw($i,current)]} {
+	    set hdw($i,current) -1
+	}
 	set hdw($i,last) $hdw($i,current)
 	if {![catch {ReadCoil $i} result]} {
 	    set hdw($i,current) $result

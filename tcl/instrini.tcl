@@ -3,7 +3,7 @@
 #
 # Open and initialize serial devices
 #
-foreach dev { plc tc } {
+foreach dev { tc } {
     if [catch {serialinit $device($dev,line) $device($dev,baud) \
 	    $device($dev,bytesize) $device($dev,parity)} fd($dev)] {
 	puts stderr "Unable to open $device($dev,line) for $dev"

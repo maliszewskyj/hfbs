@@ -62,7 +62,7 @@ set debug 0
 package require BLT
 source /usr/local/hfbs/tcl/rpc.tcl
 package require narray
-foreach lib { /usr/local/hfbs/daq/libsharehist.so } {
+foreach lib { /usr/local/lib/libsharehist.so } {
     if [catch {load $lib} result] {
 	puts stderr "Can't load shared library: $lib"
 #	exit
@@ -100,13 +100,13 @@ set colors { black grey20 grey40 grey60 grey80 \
 	MidnightBlue SlateBlue SteelBlue CadetBlue }
 set livetime 0.0
 
-blt::vector y(4096)
-blt::vector xs(4096)
-blt::vector x_e(2048)
-blt::vector ydet(17)
-blt::vector xdet(17)
-for {set i 1} {$i < 17} {incr i} { blt::vector y${i}(4096) }
-for {set i 0} {$i < 17} {incr i} {    set xdet($i) $i }
+blt::vector create y(4096)
+blt::vector create xs(4096)
+blt::vector create x_e(2048)
+blt::vector create ydet(17)
+blt::vector create xdet(17)
+for {set i 1} {$i < 17} {incr i} { blt::vector create y${i}(4096) }
+for {set i 0} {$i < 17} {incr i} { set xdet($i) $i }
 
 set ordinal {}
 for {set i 0} {$i < 4096} {incr i} {
