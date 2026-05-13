@@ -34,26 +34,26 @@
 #<<<<<<<<<<<<<<<<<<<<<<<
 set debug 0
 #<<<<<<<<<<<<<<<<<<<<<<< Set up splash screen
-wm withdraw .
-toplevel .placard -borderwidth 4 -bg orange -relief raised
-wm overrideredirect .placard 1
+#wm withdraw .
+#toplevel .placard -borderwidth 4 -bg orange -relief raised
+#wm overrideredirect .placard 1
 
-after idle {
-    update idletasks
-    set xmax [winfo screenwidth .placard]
-    set ymax [winfo screenheight .placard]
-    set x0 [expr ($xmax - [winfo reqwidth .placard])/2]
-    set y0 [expr ($ymax - [winfo reqheight .placard])/2]
-    wm geometry .placard "+$x0+$y0"
-}
+#after idle {
+#    update idletasks
+#    set xmax [winfo screenwidth .placard]
+#    set ymax [winfo screenheight .placard]
+#    set x0 [expr ($xmax - [winfo reqwidth .placard])/2]
+#    set y0 [expr ($ymax - [winfo reqheight .placard])/2]
+#    wm geometry .placard "+$x0+$y0"
+#}
 
-label .placard.info -bg orange \
-	-text "National Institute of Standards and Technology"
-pack .placard.info -side bottom -fill x
-set imh [image create photo -file /usr/local/hfbs/lib/images/ncnrtrans.gif]
-label .placard.icon -image $imh -bg orange
-pack .placard.icon -side top 
-update
+#label .placard.info -bg orange \
+#	-text "National Institute of Standards and Technology"
+#pack .placard.info -side bottom -fill x
+#set imh [image create photo -file /usr/local/hfbs/lib/images/ncnrtrans.gif]
+#label .placard.icon -image $imh -bg orange
+#pack .placard.icon -side top 
+#update
 #<<<<<<<<<<<<<<<<<<<<<<< End of splash screen setup
 
 
@@ -62,8 +62,7 @@ update
 package require BLT
 source /usr/local/hfbs/tcl/rpc.tcl
 package require narray
-foreach lib { libaryimg.so \
-	libsharehist.so \
+foreach lib { libsharehist.so \
 	libmtxutil.so } {
     if [catch {load $lib} result] {
 	puts stderr "Can't load shared library: $lib"
@@ -102,14 +101,16 @@ set colors { black grey20 grey40 grey60 grey80 \
 	MidnightBlue SlateBlue SteelBlue CadetBlue }
 set livetime 0.0
 
-blt::vector y(4096)
-blt::vector xs(4096)
-blt::vector x_e(2048)
-blt::vector ydet(17)
-blt::vector xdet(17)
-for {set i 1} {$i < 17} {incr i} { blt::vector y${i}(4096) }
+blt::vector create y(4096)
+blt::vector create xs(4096)
+blt::vector create x_e(2048)
+blt::vector create ydet(17)
+blt::vector create xdet(17)
+for {set i 1} {$i < 17} {incr i} { blt::vector create y${i}(4096) }
 for {set i 0} {$i < 17} {incr i} {    set xdet($i) $i }
-narray2vec ordinal x xs
+#narray2vec ordinal x xs
+xs set [mtx list ordinal x]
+
 
 # Global variables for control
 set control(knownmodes) {pst time velocity scan}
@@ -121,7 +122,7 @@ set control(pstspdset)  4728; # Choose reasonable default
 set control(doposcamp)  0
 set control(doposcper)  60
 set control(doposc)     0
-set control(tempset)    300.0
+set control(tempset)    300.000
 set control(tempramp)   0.0
 set control(tempchoose) lk340
 set control(sampsensor) A
@@ -417,7 +418,7 @@ proc RemoteUpdate { } {
 proc Refresh { } {
     global total xs y .g control chans dets vmemode view runinfo
 
-    set control(veclen) [sharehist total]
+    set control(veclen) [share total]
     set control(mode) [lindex $control(knownmodes) $vmemode]
 
     set view(integrate_done) 0
@@ -437,7 +438,6 @@ proc Refresh { } {
     return 0
 }
 
-
 proc Integrate { } {
     global ydet xdet control chans view livetime
 
@@ -450,7 +450,8 @@ proc Integrate { } {
     # Get livetime from linked variable
 
     data collapse {0 1} hvec
-    narray2vec hvec x ydet
+    #narray2vec hvec x ydet
+    ydet set [mtx list hvec x]
     catch {.sum.l configure -text [ListSum]}
     set ydet(0) 0 ;# Kludge for high counts in monitor channel
     PutText ""
@@ -465,7 +466,7 @@ proc Integrate { } {
 # writing to a file.
 #
 proc SplitMats { } {
-    global logs total work2 control livetime dets chans view
+    global logs total work2 control livetime dets chans view pv xvec data
     
     PutText "Processing raw data"
     BusyCursorOn
@@ -1500,7 +1501,8 @@ proc ShowNewDet { i } {
 		return -code error "ERR:\nBad mode"
 	    }
 	}
-	narray2vec xvec 0 x xs
+	#narray2vec xvec 0 x xs
+	xs set [mtx list xvec 0 x]
 	if {$view(norm_smpl)} {
 	    .g yaxis configure -title "Rate (Counts/min)"
 	} else {
@@ -1508,7 +1510,8 @@ proc ShowNewDet { i } {
 	}
 	.g element configure e0 -hide 1
 	for {set i 1} {$i < 17} {incr i} {
-	    narray2vec data $i x y$i
+	    #narray2vec data $i x y$i
+	    y${i} set [mtx list data $i x]
 	    .g element configure e${i} -xdata xs -ydata y$i \
 		    -hide [expr !$view($i)]
 	}
@@ -1531,13 +1534,15 @@ proc ShowNewDet { i } {
 	    hvec vset ndets $ndets
 	    # hvec map {[] /= $ndets;}
 	}
-	narray2vec hvec x y
+	#narray2vec hvec x y
+	y set [mtx list hvec x]
 	if {$view(norm_smpl)} {
 	    .g yaxis configure -title "Rate (Counts/min)"
 	} else {
 	    .g yaxis configure -title "Intensity (Counts)"
 	}
-	narray2vec xvec 0 x xs
+	#narray2vec xvec 0 x xs
+	xs set [mtx list xvec 0 x]
 	.g element configure e0 -xdata xs -ydata y
 	switch $control(mode) {
 	    pst {	.g xaxis configure -title "PST Channel"  }
@@ -1557,19 +1562,22 @@ proc ShowNewDet { i } {
     } elseif [regexp {sample(.*)} $i match s_typ] {
 	switch $s_typ {
 	    mon {
-		narray2vec pv 0 x y
+		#narray2vec pv 0 x y
+		y set [mtx list pv 0 x]
 	    }
 	    lo {
 		if {[string compare $control(mode) "pst"] != 0} {
 		    return -code error "ERR:\nNot available in this mode"
 		}
-		narray2vec pv 1 x y
+		#narray2vec pv 1 x y
+		y set [mtx list pv 1 x]
 	    }
 	    hi {
 		if {[string compare $control(mode) "pst"] != 0} {
 		    return -code error "ERR:\nNot available in this mode"
 		}
-		narray2vec pv 5 x y
+		#narray2vec pv 5 x y
+		y set [mtx list pv 5 x]
 	    }
 	    default {
 		return -code error "ERR:\nSampling type not available"
@@ -1587,7 +1595,8 @@ proc ShowNewDet { i } {
 	} else {
 	    .g yaxis configure -title "Intensity (Counts)"
 	}
-	narray2vec xvec 0 x xs
+	#narray2vec xvec 0 x xs
+	xs set [mtx list xvec 0 x]
 	.g element configure e0 -xdata xs -ydata y
 	switch $control(mode) {
 	    pst {	.g xaxis configure -title "PST Channel"  }
@@ -1610,7 +1619,8 @@ proc ShowNewDet { i } {
 	    return
 	}
 	set view(currentdet) $i
-	narray2vec data $i x y
+	#narray2vec data $i x y
+	y set [mtx list data $i x]
 	if {$i == 0} {
 	    set view(detlabel) Monitor
 	} else {
@@ -1627,7 +1637,8 @@ proc ShowNewDet { i } {
 	} else {
 	    .g yaxis configure -title "Intensity (Counts)"
 	}
-	narray2vec xvec 0 x xs
+	#narray2vec xvec 0 x xs
+	xs set [mtx list xvec 0 x]
 	.g element configure e0 -xdata xs -ydata y
 	switch $control(mode) {
 	    pst {	.g xaxis configure -title "PST Channel"  }
@@ -1647,7 +1658,7 @@ proc MonitorStart { } {
 }
 
 proc GetStatus { } {
-    catch {Launch status brief} result
+    catch {Launch status full} result
     PutText $result
 }
 

@@ -100,7 +100,7 @@ set hdw(doppler_t_in,reg)          1045
 set hdw(doppler_t_out,reg)         1047
 set hdw(doppler_t_bsh,reg)         1055
 set hdw(doppler_p_in,reg)          1041
-set hdw(doppler_p_out,reg)         1042
+set hdw(doppler_p_out,reg)         1043
 set hdw(doppler_flow,reg)          1053
 set hdw(doppler_hrate,reg)         1001 ;# This _was_ a speed reading originally
 set hdw(pst_flow,reg)              1063
@@ -142,7 +142,9 @@ set hdw(plc,coils)             {doppler_enable doppler_oilpressure \
 # Upper limit for the speeds of the Doppler and PST
 #      For now, just make a guess
 set hdw(pst_speed,limit)        4900.0
-set hdw(doppler_speed,limit)    75.0
+#set hdw(doppler_speed,limit)    75.0
+set hdw(doppler_speed,limit)    300
+# Doppler speed is in rpm of cam, not of monochromator
 
 # The Doppler drive motor and PST motor speeds are programmed though the
 # PLC by setting a voltage. The range is the mapping between the digital
