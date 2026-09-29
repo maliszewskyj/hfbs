@@ -151,8 +151,12 @@ int dsp_load(int mode){
     if (retries>3) return -1;
 
     /* start SHARC */
+    if (traceflag) TRACE("checking on SHARC DSP before start\n");
+    rc = stat_dsp(sharc_fd);
     if (traceflag) TRACE("starting SHARC DSP\n");
     rc = start_dsp(sharc_fd);
+    if (rc < 0) return rc;
+    rc = stat_dsp(sharc_fd);
     return rc;
 }
 /*==========================================================================*/
@@ -714,7 +718,7 @@ void dmp_regs(void) {
   //  printf("LATCHMSK = 0x%08x %u\n",val[14],val[14]);
   for (i=0;i<24;i++) {
     addr += 4;
-    printf("INTRAM + 0x%03x *(0x%08x) = 0x%08x %d\n",0x800 + i,addr,val[i],val[i]);
+    printf("INTRAM + 0x%03x *(0x%08x) = 0x%08x %ud\n",0x800 + i,addr,val[i],val[i]);
   }
 
   //  addr = INTRAM + 0x20C0;

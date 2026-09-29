@@ -41,11 +41,12 @@ start_dsp(int p)
     }
     if (reg.error) {
         printf("start_dsp: err=0x%x\n", reg.error);
+	return -1;
     }
     return 0;
 }
 /*===========================================================================*/
-static int
+int
 reset_dsp(int p)
 {
     struct sis1100_ctrl_reg reg;
@@ -68,7 +69,7 @@ reset_dsp(int p)
     return 0;
 }
 /*===========================================================================*/
-static int
+int
 stat_dsp(int p)
 {
     struct sis1100_ctrl_reg reg;
@@ -76,6 +77,7 @@ stat_dsp(int p)
     reg.error=0;
     if (ioctl(p, SIS1100_CTRL_READ, &reg)<0) {
         printf("stat_dsp: %s\n", strerror(errno));
+	return -1;
     }
     if (reg.error) {
         printf("stat_dsp: err=0x%x\n", reg.error);

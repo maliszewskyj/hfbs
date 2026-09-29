@@ -108,6 +108,9 @@ proc doppler { args } {
 	    }
 	    return [format "%.1f" $result]
 	}
+	info {
+	    return [format "%.1f" $hdw(doppler_speed,current)]
+	}
 	default {
 	    return -code error \
 		    "ERR:\nDoppler actions: speed enable oscillate disable info"
@@ -144,7 +147,7 @@ proc ReadRegister { fld } {
     lappend validdata doppler_speed
 
     if {[lsearch $validdata $fld] < 0} {
-	set result "Valid arguments = [join [lsort $hdw(plc,defined)]]"
+	set result "Valid arguments = [join [lsort $hdw(plc,registers)]]"
 	return -code error $result
     }
 
@@ -164,7 +167,7 @@ proc WriteRegister { fld val } {
     lappend validdata doppler_speed
 
     if {[lsearch $validdata $fld] < 0} {
-	set result "Valid arguments = [join [lsort $hdw(plc,defined)]]"
+	set result "Valid arguments = [join [lsort $hdw(plc,registers)]]"
 	return -code error $result
     }
 
@@ -293,7 +296,7 @@ proc PSTSpeed { speed } {
 
     putmsg $logs(corelog) "Setting PST speed to $speed"
     
-    if [catch {WriteRegister pst_setp $speed} result] {
+    if [catch {WriteRegister pst_setp_req $speed} result] {
 	return -code error $result
     }
 
@@ -346,7 +349,7 @@ proc DopplerSpeed { speed {silent 0}} {
 		"ERR:\nRequested Doppler speed exceeds current limit"
     }
 
-    if [catch {WriteRegister doppler_setp $speed} result] {
+    if [catch {WriteRegister doppler_setp_req $speed} result] {
 	return -code error $result
     }
 

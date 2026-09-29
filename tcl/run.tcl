@@ -79,16 +79,7 @@ proc RunStart { ncycles cycletime {mode velocity} {comments ""}} {
 
     switch $mode {
 	pst      { set run(timebin) 30 }
-	time     { 
-	    set freq $hdw(doppler_hrate,current)
-	    # set freq [expr 2 * $hdw(doppler_speed,current)]
-	    if {$freq < 0.01} {
-		return -code error "ERR:\nDoppler Drive appears to be stopped."
-	    }
-	    set val [expr round( 6e6 / ($freq * 4096))]
-	    set run(timebin) [expr $val + 1]
-	    if {$run(timebin) < 30} {set run(timebin) 30}
-	}
+	time     { set run(timebin) 30 }
 	velocity { set run(timebin) 30 }
 	default {
 	    return -code error \
@@ -97,7 +88,7 @@ proc RunStart { ncycles cycletime {mode velocity} {comments ""}} {
     }
 
     # Set frequency of heartbeat for time binning mode
-    catch {acquire timebin $run(timebin)} result
+    #catch {acquire timebin $run(timebin)} result
 
     # Set run mode
     set errcount 0
@@ -143,6 +134,13 @@ proc RunStart { ncycles cycletime {mode velocity} {comments ""}} {
     set run(checktemp)  0
     set run(checkdop)   0
 
+    set ticks [ expr 1000 * $run(cyctime)]
+
+    if [catch {acquire preset $ticks} result] {
+	return -code error "RunStart error: $result"
+    }
+
+    
     # Start run now
     set errcount
     while [catch {acquire start} result] {
@@ -198,16 +196,7 @@ proc RunBuffer { bufno } {
 
     switch $mode {
 	pst      { set run(timebin) 30 }
-	time     { 
-	    # Should actually measure doppler frequency
-	    set freq $hdw(doppler_hrate,current)
-	    if {$freq < 0.01} {
-		return -code error "ERR:\nDoppler Drive appears to be stopped."
-	    }
-	    set val [expr round( 6e6 / ($freq * 4096))]
-	    set run(timebin) [expr $val + 1]
-	    if {$run(timebin) < 30} {set run(timebin) 30}
-	}
+	time     { set run(timebin) 30 }
 	velocity { set run(timebin) 30 }
 	default {
 	    return -code error \
@@ -216,7 +205,7 @@ proc RunBuffer { bufno } {
     }
 
     # Set frequency of heartbeat for time binning mode
-    catch {acquire timebin $run(timebin)} result
+    #catch {acquire timebin $run(timebin)} result
 
     # Set run mode
     set errcount 0
@@ -230,6 +219,7 @@ proc RunBuffer { bufno } {
 	    return -code error "ERR:\nCould not set run mode: $result"
 	}
     }
+
 
     # Initialize the cumulative histogram to zero
     catch {acquire clear total}
@@ -262,6 +252,12 @@ proc RunBuffer { bufno } {
     set run(checktemp)  $hfbsbuf($bufno,checktemp)
     set run(checkdop)   $hfbsbuf($bufno,checkdop)
 
+    set ticks [ expr 1000 * $run(cyctime)]
+
+    if [catch {acquire preset $ticks} result] {
+	return -code error "RunStart error: $result"
+    }
+    
     # Start run now
     set errcount
     while [catch {acquire start} result] {
@@ -291,7 +287,7 @@ proc RunBuffer { bufno } {
     set msg "     Cycles   = $run(ncycles)  Cycletime = $run(cyctime)"
     putmsg $outlun $msg
     putmsg $logs(status) [status full]
-    set time(run,id) [after [expr 1000 * $run(cyctime)] RunProgress]
+    set time(run,id) [after [expr 1000 * $run(cyctime)] RunProgressCycle]
     return "OK:\nRun started. Filename = $run(rundir)/$run(runfile)"
 }
 
@@ -433,25 +429,45 @@ proc RunTruncate { } {
     
 }
 
+proc RunProgressCycle { } {
+    global action run tc time logs livetime comm
+
+    puts "RunProgressCycle"
+    if [catch {acquire counting} counting] {
+	return code -error "ERR:\nUnable to determine if we're counting/scan"
+    }
+    if {$counting} {
+	# We're not done, poll again
+	set time(run,id) [after 5000 RunProgressCycle]
+	return $action(doingrun)
+    } else {
+	return [RunProgress]
+    }
+}
+
 proc RunProgress { } {
     global hdw time run action logs comm tc livetime increment total
 
+    puts "RunProgress"
     if {!$action(doingrun)} { return }
+
+    catch {acquire counting} counting
+    if ($counting) {
+	set errcount 0
+	while [catch {acquire stop} result] {
+	    putmsg [expr $logs(corelog) + $logs(errlog)] \
+		"Error stopping run: $result"
+	    incr errcount
+	    if {$errcount > 2} {
+		set keeprun 0
+		break
+	    }
+	}
+    }
 
     set keeprun 1
     set msg "     Run: retrieving data for cycle $run(curcycle)"
     putmsg [expr $logs(stdout) + $logs(corelog)] $msg
-
-    set errcount 0
-    while [catch {acquire stop} result] {
-	putmsg [expr $logs(corelog) + $logs(errlog)] \
-	    "Error stopping run: $result"
-	incr errcount
-	if {$errcount > 2} {
-	    set keeprun 0
-	    break
-	}
-    }
 
     # increment current cycle counter
     incr run(curcycle)

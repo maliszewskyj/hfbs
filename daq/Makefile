@@ -1,11 +1,13 @@
 
-AOBJ = acquire.o dsplink.o dspload.o read_dsp_coff.c read_dsp_ldr.c read_dsp_raw.c
+#AOBJ = acquire.o dsplink.o dspload.o read_dsp_coff.c read_dsp_ldr.c read_dsp_raw.c
+AOBJ = acquire.o tcp_io.o
 HOBJ = sharehist.o
 MOBJ = mtxutil.o
 #LIBS = -lefence
 SISDIR = ../sis1100-linux-sis1100-2.16-0
 TCLDIR = /usr/include/tcl8.6
-INC = -I$(SISDIR)/dev/pci/ -I$(SISDIR)/sis3100_calls -I$(SISDIR)/sis3100_calls/header -I$(TCLDIR) -I/usr/local/hfbs/include -I.
+#INC = -I$(SISDIR)/dev/pci/ -I$(SISDIR)/sis3100_calls -I$(SISDIR)/sis3100_calls/header -I$(TCLDIR) -I/usr/local/hfbs/include -I.
+INC = -I$(TCLDIR) -I.
 CFLAGS=-g -fPIC -Wall -DCLIENT -I/usr/local/include $(INC)
 LIBS = -lm -lefence
 SISLIBS = -L$(SISDIR)/sis3100_calls/ -l_sis3100 
@@ -15,7 +17,7 @@ all: libs
 libs: libacquire.so libsharehist.so
 
 libacquire.so: $(AOBJ)
-	$(CC) -shared -o libacquire.so $(AOBJ) $(LIBS) $(SISLIBS)
+	$(CC) -shared -o libacquire.so $(AOBJ) $(LIBS) 
 
 libsharehist.so: $(HOBJ)
 	$(CC) -shared -o libsharehist.so $(HOBJ) $(LIBS)

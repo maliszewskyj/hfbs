@@ -35,6 +35,8 @@ set hdw(doppler_hrate,last)         -1
 set hdw(doppler_hrate,current)      -1
 set hdw(doppler_setp,last)          -1
 set hdw(doppler_setp,current)       -1
+set hdw(doppler_setp_req,last)       -1
+set hdw(doppler_setp_req,current)   -1
 set hdw(pst_flow,last)              -1
 set hdw(pst_flow,current)           -1
 set hdw(pst_temp,last)              -1
@@ -45,6 +47,8 @@ set hdw(pst_speed,last)             -1
 set hdw(pst_speed,current)          -1
 set hdw(pst_setp,last)              -1
 set hdw(pst_setp,current)           -1
+set hdw(pst_setp_req,last)          -1
+set hdw(pst_setp_req,current)       -1
 set hdw(vac,last)                   -1
 set hdw(vac,current)                -1
 
@@ -109,8 +113,10 @@ set hdw(pst_hrate,reg)             1013 ;# This _was_ also a speed reading
 set hdw(vac,reg)                   1029
 set hdw(doppler_speed,reg)         1001
 set hdw(doppler_setp,reg)          2001
+set hdw(doppler_setp_req,reg)      2001
 set hdw(pst_speed,reg)             1013
-set hdw(pst_setp,reg)              2009
+set hdw(pst_setp,reg)              1015
+set hdw(pst_setp_req,reg)          2009
 
 # Software enables for doppler & PST; specify in hexadecimal
 #
@@ -133,7 +139,8 @@ set hdw(plc,registers)         {doppler_t_in doppler_t_out \
                                 pst_flow pst_temp \
 			        pst_hrate vac \
 				doppler_speed pst_speed \
-				doppler_setp pst_setp }
+				doppler_setp pst_setp \
+                                doppler_setp_req pst_setp_req }
 set hdw(plc,coils)             {doppler_enable doppler_oilpressure \
                                 doppler_oiltemp doppler_vibration \
                                 pst_enable pst_vibration \
@@ -143,7 +150,7 @@ set hdw(plc,coils)             {doppler_enable doppler_oilpressure \
 #      For now, just make a guess
 set hdw(pst_speed,limit)        4900.0
 #set hdw(doppler_speed,limit)    75.0
-set hdw(doppler_speed,limit)    300
+set hdw(doppler_speed,limit)    1500
 # Doppler speed is in rpm of cam, not of monochromator
 
 # The Doppler drive motor and PST motor speeds are programmed though the

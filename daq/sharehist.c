@@ -1,4 +1,4 @@
-static char rcsid[] = "$Id: sharehist.c,v 1.1.1.1 1999/09/20 14:32:07 nickm Exp $";
+static char rcsid[] = "$Id: sharehist.c,v 2.0 2026/08/28 14:32:07 nickm Exp $";
 /*
  * NAME
  *      sharehist - a loadable Tcl extension for accessing shared memory
@@ -72,6 +72,8 @@ void Calc_Vectors()
 int share_update(Tcl_Interp * interp, int objc, char * objv[])
 {
   char outval[80];
+  unsigned int rawval;
+  unsigned int Remote[NDCHAN][NTCHAN], *pRemote;
   int i;
   // Copy histogram directly from shared memory segment
    /* Read semaphores to determine data acquisition mode */
@@ -79,6 +81,7 @@ int share_update(Tcl_Interp * interp, int objc, char * objv[])
     fprintf(stderr,"Error determining acquisition mode from semaphore.\n");
   } else {
     vme_mode = semval;
+    //printf("Acquisition mode = %d\n",vme_mode);
   }
 
   /* Read semaphores to determine live acquisition time */
@@ -88,7 +91,11 @@ int share_update(Tcl_Interp * interp, int objc, char * objv[])
     live_time = (float) semval;
   }
 
+  memset(Remote,0,sizeof(Remote));
+  pRemote = &Remote[0][0];
   memcpy(pTotal, shmptr, (NTCHAN*NDCHAN*sizeof(float)));
+  memcpy(pRemote, shmptr, (NDCHAN*NTCHAN*sizeof(unsigned int)));
+  
   switch(vme_mode) {
   case 0:sprintf(mode,"pst"); break;
   case 1:sprintf(mode,"time"); break;
@@ -107,13 +114,16 @@ int share_update(Tcl_Interp * interp, int objc, char * objv[])
   if (vme_mode == 3) {
     /* Walk through monitor channel looking for fill value */
     for (i=0;i<NTCHAN;i++) {
-      if (*(pTotal + i) <= (float) 0.0) break;
+      //printf("pTotal[%d] = %f\n",i,*(pTotal+i));
+      if (*(pTotal + i) < 0) break;
+      rawval = *(pRemote + i);
     }
     ntch = i;
   } else {
     ntch = ntchans[vme_mode];
   }
   sprintf(outval,"%d",ntch);
+  //printf("ntch = %d\n",ntch);
   Tcl_AppendResult(interp,outval,(char *) NULL);
   return TCL_OK;
 }
@@ -211,22 +221,25 @@ int share_split(Tcl_Interp *interp, int objc, char * objv[])
     break;
   case 2: /* Velocity */
   case 3: /* Scan */
-    memcpy(wrk,(array1 + 18 * rowlen), ntch * sizeof(float));
+    //memcpy(wrk,(array1 + 18 * rowlen), ntch * sizeof(float));
     /* Fill in sample array */
 
-    memcpy(wrk,(array1 + 19 * rowlen), ntch * sizeof(float));
+    //memcpy(wrk,(array1 + 19 * rowlen), ntch * sizeof(float));
     //for (i=1;i<17;i++) {
     //  memcpy((array3 + i * NTCHAN), wrk, ntch * sizeof(float));
     //}
-    memcpy(array3,wrk,ntch*sizeof(float));
+    memcpy(array3,(array1 + 19 * rowlen),ntch*sizeof(float)); // pV
     /* Fill in data array */
     for (i=0;i<17;i++) {
-      memcpy(wrk, (array1 + i * rowlen), ntch * sizeof(float));
-      memcpy((array2 + i * NTCHAN), wrk, ntch * sizeof(float));
+      memcpy((array2 + i * NTCHAN), (array1 + i * rowlen), ntch * sizeof(float));
     }
 
+    for (i=0;i<ntch;i++) {
+      *(array4 + i) = i; // Just ordinal
+    }
     /* Fill in x position array */
-    memcpy(array4,(array1 + 17 * rowlen), ntch*sizeof(float));
+    //memcpy(array4,(array1 + 17 * rowlen), ntch*sizeof(float));
+    
     break;
   default:
     Tcl_SetResult(interp,"Bad mode number",TCL_STATIC);

@@ -113,6 +113,7 @@ proc ScanBuffer { bufno } {
 
     # Initialize entire shared memory histogram to fill value
     acquire fill
+    acquire share total
 
     # Write entry to log file
     
@@ -221,7 +222,7 @@ proc ScanStart { args } {
 
     # Initialize entire shared memory histogram to fill value
     catch {acquire clear}
-    acquire fill
+    catch {acquire fill}
 
     # Write entry to log file
     
@@ -269,6 +270,16 @@ proc ScanStartPoint { } {
     puts "ScanStartPoint"
     # Start run now
     set errcount 0
+
+    # Clear remote histogram
+    catch {acquire clear}
+
+    set ticks [ expr 1000 * $run(cyctime)]
+
+    if [catch {acquire preset $ticks} result] {
+	return -code error "ScanStartPoint error: $result"
+    }
+    
     while [catch {acquire start} result] {
 	putmsg [expr $logs(corelog) + $logs(errlog)] \
 		"Could not start run: $result"
@@ -282,9 +293,25 @@ proc ScanStartPoint { } {
 
     # Write to status file
     putmsg $logs(status) [status full]
-    set time(run,id) [after [expr 1000 * $run(cyctime)] ScanFinishPoint]
+    set time(run,id) [after [expr 1000 * $run(cyctime)] ScanProgressPoint]
 
     return $action(doingrun)
+}
+
+proc ScanProgressPoint { } {
+    global action run tc time logs livetime comm
+
+    puts "ScanProgressPoint"
+    if [catch {acquire counting} counting] {
+	return code -error "ERR:\nUnable to determine if we're counting/scan"
+    }
+    if {$counting} {
+	# We're not done, poll again
+	set time(run,id) [after 5000 ScanProgressPoint]
+	return $action(doingrun)
+    } else {
+	return [ScanFinishPoint]
+    }
 }
 
 proc ScanFinishPoint { } {
@@ -293,13 +320,17 @@ proc ScanFinishPoint { } {
     puts "ScanFinishPoint"
     if {!$action(doingrun)} { return }
 
-    set errcount 0
-    while [catch {acquire stop} result] {
-	putmsg $logs(errlog) "Error stopping run: $result"
-	incr errcount
-	if {$errcount > 2} {
-	    set keeprun 0
-	    break
+    catch {acquire counting} counting
+
+    if {$counting} {
+	set errcount 0
+	while [catch {acquire stop} result] {
+	    putmsg $logs(errlog) "Error stopping run: $result"
+	    incr errcount
+	    if {$errcount > 2} {
+		set keeprun 0
+		break
+	    }
 	}
     }
 

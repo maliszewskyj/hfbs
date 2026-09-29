@@ -8,6 +8,7 @@ int reset_sis3801(void);
 int init_vadm(void);
 int dsp_reset(void);
 int dsp_load(int);
+int dsp_stat(void);
 int load_lookup(char* load_path,int load_len,unsigned int load_base);
 int read_rings(void);
 int sis3600_read(int * val);

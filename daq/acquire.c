@@ -1,4 +1,14 @@
-static char rcsid[] = "$Id: acquire.c,v 1.8 2008/05/15 16:46:46 nickm Exp $";
+static char rcsid[] = "$Id: acquire.c,v 2.0 2026/08/17 16:46:46 nickm Exp $";
+/*
+   TODO: Figure out transferring scaler data
+         Set data acquisition mode remotely
+	 Make data acquisition mode make sense
+	 Transfer livetime
+	 Transfer
+
+
+   REMOTE Server needs to know only two modes: PST binning and Energy binning
+ */
 /*
  * NAME
  *      acquire - a loadable Tcl extension for data acquisition
@@ -18,14 +28,10 @@ static char rcsid[] = "$Id: acquire.c,v 1.8 2008/05/15 16:46:46 nickm Exp $";
  *
  *      acquire stop
  *
- *      acquire resume
- * 
- *      acquire add ?narray1? ?narray2?
+ *      acquire add ?array1? ?array2?
  *
  *      acquire timer
  *        reads IRQ counter to get a total live time
- *      acquire load
- *        forces an upload of lookup tables
  *      acquire mode ?pst/time/velocity?
  */
 
@@ -43,45 +49,27 @@ static char rcsid[] = "$Id: acquire.c,v 1.8 2008/05/15 16:46:46 nickm Exp $";
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include "vsc16.h"
-#include "dsplink.h"
-
-#include <sis1100_var.h>
-#include <sis3100_vme_calls.h>
+#include <errno.h>
 
 #include "tcp_io.h"
 
+extern int errno;
+// char * host = "hfbsdaq.ncnr.nist.gov";
+char * daqserver = "129.6.120.54";
+#define SERVERPORT 10000
 #define TBINDEFAULT  30
-#define ELEMENTS     4096*20
 
-#define VSC_BASE     0x43520000
-#define SIS3801_BASE 0x43508000
-#define SCALERBASE   0x43508000
-#define SIS3600_BASE 0x43509000
-#define LATCHBASE    0x43509000
+#define NTCHAN   4096
+#define NDCHAN   20
 
-#define hisBase 0x00080000	/* base of 1 MB BRAM on VSB   */
-#define INTRAM  0x81200000
-#define irqctr    0x81202008	/* irq counter in INTRAM on SIS9200 */
-#define latchval  0x8120204C	/* irq counter in INTRAM on SIS9200 */
-#define latchmsk  0x81202050	/* irq counter in INTRAM on SIS9200 */
-#define ptroff1 0x81202080 	/* Pointer offset 1     */
-#define ptroff2 0x81202084	/* Pointer offset 2     */
-#define ptroff3 0x81202088	/* Pointer offset 3     */
-#define ptroff4 0x8120208C      /* Pointer offset 4     */
+#define ELEMENTS NTCHAN*NDCHAN
 
-#define NTCHAN  4096
-#define NDCHAN  20
-
-unsigned long *data_ptr;
-unsigned long *save_ptr;
-unsigned long *ctrl_ptr,*look_ptr;
-unsigned long *run_ptr,*new_run_ptr,*mode_ptr,*save_time_ptr;
-unsigned long *rptr,*wptr,*mem;
-unsigned long *timlook;
 
 u_int32_t data_array[ELEMENTS];
 time_t t12,t1,t2;
+
+char * rdev = "HFBS_SHM_DATA";
+#define HFBS_SHM_DATA_SIZE (NDCHAN*NTCHAN*sizeof(int))
 
 /* I really shouldn't have to do this, but /usr/include/bits/sem.h says I do */
 #ifdef _SEM_SEMUN_UNDEFINED
@@ -95,12 +83,7 @@ union semun
 #endif
 
 /* Instrument-specific definitions */
-#define TIME_BIN      20e-6
-
-#define VME_UNKNOWN       0
-#define VME_SAMESTATE    -1
-#define VME_INVALID      -2
-
+#define TIME_BIN      30e-6
 
 float * remote_hist;
 float * pIncrement;
@@ -109,29 +92,31 @@ float Total[NDCHAN][NTCHAN];
 float Increment[NDCHAN][NTCHAN];
 float Energy[NTCHAN];
 float Ordinal[NTCHAN];
-float Remote[NDCHAN][NTCHAN];
+int Remote[NDCHAN][NTCHAN];
 
 double live_time=0.0;
 int     remote_len;
 /*
  * Acquisition modes: 0 = pst      binning (teach)
- *                    1 = time     binning (time of flight)
- *                    2 = velocity binning (standard)
- *                    3 = scan             (standard again)
+ *                    1 = energy   binning (time of flight)
+ *                    2 = energy   binning (time of flight) DEFAULT
+ *                    3 = scan             (energy binning with fill)
+ *
+ * The remote server only knows PST binning (0) and Energy binning (1)
  */
+int     daq_mode=0;
 int     ndchans[4] = {  20,  20,  20,  20};
 int     smpdet[4]  = {  19,  19,  19,  19};
 int     sum_mask[20] = { 0, 1, 1, 1, 1, 
 			 1, 1, 1, 1, 1, 
 			 1, 1, 1, 1, 1,
 			 0, 0, 0, 0, 0};
-int     vme_mode=0;
-static char * vme_dev   = "/dev/sis1100_00remote";
-static char * sdram_dev = "/dev/sis1100_00ram";
-static char * sharc_dev = "/dev/sis1100_00dsp";
-int vme_fd=0;
-int sdram_fd=0;
-int sharc_fd=0;
+#define CMD_MODE_PBN 0
+#define CMD_MODE_TBN 2
+#define CMD_MODE_EBN 1
+#define CMD_MODE_SCN 3 // Really energy binning but with "stuffing"
+
+
 int traceflag=0;
 int timbin = TBINDEFAULT;
 int test_pulse = 0;
@@ -141,9 +126,6 @@ key_t shkey, semkey;
 int shmid, semid;
 char * shmptr;
 union semun semctl_arg;
-
-char * daqserver = "192.168.120.15"; 
-/* char * daqserver = "localhost"; */
 
 int udpsock=0;
 #define BROADCASTPORT 8080
@@ -203,7 +185,6 @@ void Calc_LiveTime(double * livetime)
   }
   if (traceflag) printf("livetime: %f\n",*livetime);
 
-  //*livetime *= timbin;
 }
 
 void Calc_Vectors()
@@ -221,32 +202,54 @@ void Calc_Vectors()
 /*
  * Save data from remote histogram into local array
  */
-int acq_update(Tcl_Interp * interp, int objc, char * objv[])
+int acq_update(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
-  int i, j;
+  int i, j, retn;
+  int sockfd;
+  //  int blocksize=8192;
+  int blocksize=327680;
+  unsigned int tmpval;
+  unsigned int * tlptr;
+  int * pRemote;
+  
+  
   if (objc < 1) {
     Tcl_SetResult(interp,"Usage: acquire update ?arrayName?",TCL_STATIC);
     return TCL_ERROR;
   }
-  if (traceflag) printf("acquire update\n");
-  remote_len = NDCHAN * NTCHAN;
-
-  /* Set acquisition mode semaphore so our clients know what mode is set */
-  semctl_arg.val = vme_mode;
-  if (semctl(semid,0,SETVAL,semctl_arg) < 0) {
-    fprintf(stderr,"Error setting mode semaphore.\n");
+  if (traceflag) printf("acquire update [from histogram server]\n");
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open remote server",TCL_STATIC);
+    return TCL_ERROR;
   }
-
+  memset(Remote,0,sizeof(Remote));
+  tmpval = htonl(blocksize);
+  //printf("Requesting transfer. Blocksize = %d\n",blocksize);
+  retn = sendPKG(sockfd,OP_CMD,CMD_XFER,&tmpval,sizeof(tmpval));
+  //printf(" sendPKG: retn = %d\n",retn);
+  
+  //printf("Receiving histogram\n");
+  pRemote = &Remote[0][0];
+  retn = recvHIST(sockfd,pRemote,sizeof(Remote));
+  //printf("  recvHIST: retn = %d\n",retn);
+  
+  net_close(sockfd);
+  sockfd=-1;
+  /* Set acquisition mode semaphore so our clients know what mode is set */
+  semctl_arg.val = daq_mode;
+  if (semctl(semid,0,SETVAL,semctl_arg) < 0) {
+    fprintf(stderr,"Error setting mode semaphore: %s\n",strerror(errno));
+  }
+  
   /* Shuffle data into un-interleaved form if we're doing velocity binning */
-  if ((vme_mode == CMD_MODE_VBN) || (vme_mode == CMD_MODE_SCN)) ShuffleData();
-
-  Calc_LiveTime(&live_time);
+  // if ((daq_mode == CMD_MODE_VBN) || (daq_mode == CMD_MODE_SCN)) ShuffleData();
+  //Calc_LiveTime(&live_time);
   //memcpy(pIncrement,remote_hist,remote_len*sizeof(float));
   //memset(remote_hist,0,remote_len*sizeof(float));
   for(i=0;i<NDCHAN;i++) {
     for (j=0;j<NTCHAN;j++) {
       Increment[i][j] = Remote[i][j];
-      //Remote[i][j] = 0;
     }
   }
 
@@ -255,31 +258,58 @@ int acq_update(Tcl_Interp * interp, int objc, char * objv[])
   return TCL_OK;
 }
 
-int acq_clear(Tcl_Interp * interp, int objc, char * objv[]) 
+int acq_clear(Tcl_Interp * interp, int objc, Tcl_Obj * objv[]) 
 {
+  int sockfd;
+  int val, lstr;
+  char *strval;
+  // NCM 9/10/2026 - trying to figure out why live plotting for scans looks wrong
+  if (objc>0) {
+    strval = Tcl_GetStringFromObj(objv[0],&lstr);
+    if (!strcmp(strval,"total")) {
+      memset(Total,0,sizeof(Total));
+    }
+  }
 
-  memset(Total,0,sizeof(Total));
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+
+  val = 0; // NCMR - Figure out test for server actively acquiring
+  if (val) {
+    Tcl_SetResult(interp,"ERR: Acquisition in progress",TCL_STATIC);
+    return TCL_ERROR;
+  }
+  
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open port on histogrammer",TCL_STATIC);
+    sockfd = 0;
+    return TCL_ERROR;
+  }
+
+  sendPKG(sockfd,OP_CMD,CMD_CLEAR,0,0);
+  net_close(sockfd);
+
+  Tcl_SetResult(interp,"OK:\nHisto clear sent.",TCL_STATIC);
   return TCL_OK;
 }
 
 // Initialize to "Fill" value = -1
-int acq_fill(Tcl_Interp * interp, int objc, char * objv[]) 
+int acq_fill(Tcl_Interp * interp, int objc, Tcl_Obj * objv[]) 
 {
   int i,j;
   for (i=0;i<NDCHAN;i++) {
     for (j=0;j<NTCHAN;j++) {
-      Total[i][j] = -1;
+      Total[i][j] = -1; 
     }
   }
   return TCL_OK;
 }
 
-int acq_insert(Tcl_Interp * interp, int objc, char * objv[]) 
+int acq_insert(Tcl_Interp * interp, int objc, Tcl_Obj * objv[]) 
 {
   int i, offset, listObjc, idet;
   Tcl_Obj ** listObjv;
   int slice[NDCHAN];
-  float dval;
+  double dval;
 
   if (objc < 2) {
     Tcl_SetResult(interp,"Usage: acquire insert ?offset? ?vals?",TCL_STATIC);
@@ -315,108 +345,204 @@ int acq_insert(Tcl_Interp * interp, int objc, char * objv[])
   return TCL_OK;
 }
 
-int acq_start(Tcl_Interp * interp, int objc, char * objv[])
+int acq_start(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
-  int rc;
+  int sockfd;
   int val;
 
-  if (traceflag) printf("acquire start\n");
-  time(&t2);
-  t12=t1-t2;
+  if (traceflag) { printf("acquire start"); fflush(stdout); }
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
 
-  if ((rc=dsp_reset()) < 0) {
-    Tcl_SetResult(interp,"error resetting DSP\n",TCL_STATIC);
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open port on histogrammer",TCL_STATIC);
+    sockfd = 0;
     return TCL_ERROR;
   }
-  init_sis3801(vme_mode);
 
-  memset(data_array,0,sizeof(data_array));
+  sendPKG(sockfd,OP_CMD,CMD_ARM,0,0);
+  net_close(sockfd);
 
-  val = vme_mode;
-  if ((rc=dsp_load(val))!=0) {
-     printf("error on loading DSP\n");
-     return TCL_ERROR;
-  }
-  init_vsc16();
-  start_vsc16(0); 
-  init_sis3600();
   if (traceflag) printf("...complete\n");
   return TCL_OK;
 
 }
 
-int acq_stop(Tcl_Interp * interp, int objc, char * objv[])
+int acq_stop(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
   int rc,readrc;
   int i,j,k;
   u_int32_t readvalue; 
 
-  if (traceflag) printf("acquire stop\n");
-  time(&t2);
-  t12=t1-t2;
+  if (traceflag) { printf("acquire stop\n"); fflush(stdout); }
+  int sockfd;
+  int val;
+  memset(Total,0,sizeof(Total));
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
 
-  rc=dsp_reset();
-  reset_sis3801();
-  reset_sis3600();
-  stop_vsc16();
-
-  memset(Remote,0,sizeof(Remote));
-  readrc = s3100_sdram_read(sdram_fd, hisBase, data_array, ELEMENTS) ;
-  if(readrc!=ELEMENTS*4) {
-        printf("error on reading Histos from  SDRAM\n");
-	Tcl_SetResult(interp,"Error reading Histos from SDRAM",TCL_STATIC);
-	return TCL_ERROR;
-  }
-  for (k=0;k<ELEMENTS;k++) {
-    i = k / NTCHAN;
-    j = k % NTCHAN;
-    Remote[i][j] = (float)data_array[k];
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open port on histogrammer",TCL_STATIC);
+    sockfd = 0;
+    return TCL_ERROR;
   }
 
-  rc=s3100_sharc_read(sharc_fd, (latchval-INTRAM), &readvalue, 1) ;
-  rc=s3100_sharc_read(sharc_fd, (latchmsk-INTRAM), &readvalue, 1) ;
+  sendPKG(sockfd,OP_CMD,CMD_DISARM,0,0);
+  net_close(sockfd);
 
-  read_rings();
+  if (traceflag) { printf("...complete\n"); fflush(stdout); }
+  return TCL_OK;
+
+}
+
+int acq_setmode(Tcl_Interp * interp, int mode)
+{
+  int sockfd;
+  int val;
+  int tmparr[2];
+
+  if (traceflag) { printf("acquire mode %d",mode); fflush(stdout); }
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open port on histogrammer",TCL_STATIC);
+    sockfd = 0;
+    return TCL_ERROR;
+  }
+  tmparr[0]=htonl(PRM_HST_MODE);
+  tmparr[1]=htonl(mode);
+
+  sendPKG(sockfd,OP_CMD,CMD_SET,tmparr,sizeof(tmparr));
+  
+  net_close(sockfd);
+
   if (traceflag) printf("...complete\n");
   return TCL_OK;
 
 }
 
-int acq_scalers(Tcl_Interp * interp, int objc, char * objv[])
+
+int acq_frames(int * nFrames)
+{
+  int retn, val,len,opcode,prm,tmpval;
+  int sockfd;
+  if (traceflag) printf("acquire frames\n");
+  
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+  if (sockfd < 0) {
+    sockfd = 0;
+    return -1;
+  }
+
+  tmpval = htonl(PRM_NFRAMES);
+  sendPKG(sockfd,OP_CMD,CMD_GET,&tmpval,sizeof(tmpval));
+  retn = recvPKG(sockfd,&len,&opcode,&prm,(char *)&val);
+
+  net_close(sockfd);
+  if (retn <= 0) return -1;
+  *nFrames = ntohl(val);
+  return 1;
+}
+
+int acq_counting(int * counting)
+{
+  int retn, val,len,opcode,prm,tmpval;
+  int sockfd;
+  if (traceflag) printf("acquire counting\n");
+  
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+  if (sockfd < 0) {
+    sockfd = 0;
+    return -1;
+  }
+
+  tmpval = htonl(PRM_STATUS);
+  sendPKG(sockfd,OP_CMD,CMD_GET,&tmpval,sizeof(tmpval));
+  usleep(100);
+  retn = recvPKG(sockfd,&len,&opcode,&prm,(char *)&val);
+  val = ntohl(val);
+  net_close(sockfd);
+  if (retn <= 0) return -1;
+  if (traceflag) printf("   status = %d\n",val);
+  *counting = (val & 0x1);
+  return 1;
+}
+
+int acq_preset(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
   int retn,i;
   char buf[20];
-  int scalers[16], ival;
+  int tmparr[2], presetms;
+  int len, opcode, prm;
   Tcl_Obj * optr;
+  int sockfd;
+  
+  if (traceflag) printf("acquire preset\n");
 
-  if (traceflag) printf("acquire scalers\n");
-  retn = 0;
-  optr = Tcl_NewListObj(0,NULL);
-  for (i=0;i<16;i++) {
-    if ((retn = vme_A32D32_read(vme_fd,VSC_BASE + VSC_DATA(i),(u_int32_t *)&ival))) {
-      Tcl_SetResult(interp,"Error reading from scaler",TCL_STATIC);
-      return TCL_ERROR;
-    }
-    Tcl_ListObjAppendElement(interp,optr,Tcl_NewIntObj(ival));
+  if (objc < 1) {
+    Tcl_SetResult(interp,"Usage: acquire preset ?presetms?",TCL_STATIC);
+    return TCL_ERROR;
   }
-  Tcl_SetObjResult(interp,optr);
+
+  if (Tcl_GetIntFromObj(interp,objv[0],&presetms) != TCL_OK) return TCL_ERROR;
+  if ((presetms < 0) || (presetms > 3600000)) {
+    Tcl_SetResult(interp,"Presetms must be between 0 and 3600000",TCL_STATIC);
+    return TCL_ERROR;
+  }
+  
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open port on histogrammer",TCL_STATIC);
+    sockfd = 0;
+    return TCL_ERROR;
+  }
+
+  tmparr[0] = htonl(PRM_TPRESET);
+  tmparr[1] = htonl(presetms);
+  sendPKG(sockfd,OP_CMD,CMD_SET,tmparr,sizeof(tmparr));
+  net_close(sockfd);
+  Tcl_SetResult(interp,"Set server preset to requested number of ms",TCL_STATIC);
   if (traceflag) printf("...complete\n");
   return TCL_OK;
 }
 
-int acq_latch(Tcl_Interp * interp, int objc, char * objv[]){
-  int retn, val;
 
-  retn = sis3600_read(&val);
+int acq_scalers(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
+{
+  int retn,i;
+  char buf[20];
+  int scalers[16], ival,tmpval;
+  int len, opcode, prm;
+  Tcl_Obj * optr;
+  int sockfd;
+  
+  if (traceflag) printf("acquire scalers\n");
+  
+  sockfd = net_open(daqserver,NULL,SERVERPORT);
+  if (sockfd < 0) {
+    Tcl_SetResult(interp,"Cannot open port on histogrammer",TCL_STATIC);
+    sockfd = 0;
+    return TCL_ERROR;
+  }
 
-  Tcl_SetObjResult(interp,Tcl_NewIntObj(val));
+  tmpval = htonl(PRM_SCALERS);
+  sendPKG(sockfd,OP_CMD,CMD_GET,&tmpval,sizeof(tmpval));
+  retn = recvPKG(sockfd,&len,&opcode,&prm,(char *)scalers);
+  net_close(sockfd);
+  optr = Tcl_NewListObj(0,NULL);
+  for (i=0;i<16;i++) {
+      // Fix byte order 
+      scalers[i] = ntohl(scalers[i]);
+      Tcl_ListObjAppendElement(interp,optr,Tcl_NewIntObj(scalers[i]));
+  }
+  Tcl_SetObjResult(interp,optr);
+
+  if (traceflag) printf("...complete\n");
   return TCL_OK;
 }
 
 /*
  * Add two arrays together - 
  */
-int acq_add(Tcl_Interp * interp, int objc, char * objv[]) 
+int acq_add(Tcl_Interp * interp, int objc, Tcl_Obj * objv[]) 
 {
   char * pArray1, * pArray2;
   int larray1, larray2;
@@ -440,8 +566,8 @@ int acq_add(Tcl_Interp * interp, int objc, char * objv[])
 
   // Fill in dimension scale
   for (i=0;i<NTCHAN;i++) {
-    switch(vme_mode) {
-    case CMD_MODE_VBN:
+    switch(daq_mode) {
+    case CMD_MODE_EBN:
       Total[17][i] = Energy[i];
       break;
     default:
@@ -451,7 +577,7 @@ int acq_add(Tcl_Interp * interp, int objc, char * objv[])
   return TCL_OK;
 }
 
-int acq_dsum(Tcl_Interp * interp, int objc, char * objv[])
+int acq_dsum(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
   char * pArray1, buf[20];
   int which=0;
@@ -489,7 +615,7 @@ int acq_dsum(Tcl_Interp * interp, int objc, char * objv[])
   return TCL_OK;
 }
 
-int acq_backfill(Tcl_Interp * interp, int objc, char * objv[])
+int acq_backfill(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
   int listObjc, i;
   Tcl_Obj **listObjv;
@@ -534,7 +660,7 @@ int acq_backfill(Tcl_Interp * interp, int objc, char * objv[])
 
 // Write scale into shared memory segment
 //      Options: ordinal energy (and should have time)
-int acq_scale(Tcl_Interp * interp, int objc, char * objv[])
+int acq_scale(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
   char * str1;
   int lstr1,i;
@@ -570,9 +696,9 @@ int acq_scale(Tcl_Interp * interp, int objc, char * objv[])
 /*
  * Reassign the storage of the indicated narray to our shared memory segment
  */
-int acq_share(Tcl_Interp * interp, int objc, char * objv[])
+int acq_share(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
-
+  int val;
   if (objc < 1) {
     Tcl_SetResult(interp,"Usage: acquire share ?array?",TCL_STATIC);
     return TCL_ERROR;
@@ -583,16 +709,21 @@ int acq_share(Tcl_Interp * interp, int objc, char * objv[])
   pTotal = &Total[0][0];
   memcpy(shmptr,pTotal,(NTCHAN*NDCHAN*sizeof(float)));
 
+  semctl_arg.val = (int) daq_mode;
+  if (semctl(semid,0,SETVAL,semctl_arg) < 0) {
+    fprintf(stderr,"acq_share semophore error: %s\n",strerror(errno));
+  }
   /* Store livetime in semaphore so our clients can access it */
-  semctl_arg.val = (int) live_time;
+  val = (int) live_time;
+  semctl_arg.val = val;
   if (semctl(semid,1,SETVAL,semctl_arg) < 0) {
-    fprintf(stderr,"Error setting mode semaphore.\n");
+    fprintf(stderr,"acq_share semophore error: %s\n",strerror(errno));
   }
   if (traceflag) printf("...complete\n");
   return TCL_OK;
 }
 
-int acq_write(Tcl_Interp * interp, int objc, char * objv[])
+int acq_write(Tcl_Interp * interp, int objc, Tcl_Obj * objv[])
 {
   char * str1, * str2, * str3;
   int lstr1, lstr2, lstr3;
@@ -628,17 +759,6 @@ int acq_write(Tcl_Interp * interp, int objc, char * objv[])
   }
   fflush(fp);
   fclose(fp);
-  return TCL_OK;
-}
-
-/* Examine contents of DSP shadowed locations */
-int acq_peek() {
-  dmp_regs();
-  return TCL_OK;
-}
-
-int acq_dump() {
-  dmp_look();
   return TCL_OK;
 }
 
@@ -686,7 +806,7 @@ int acq_udpsock()
   return 0; /* Success */
 }
 
-int acq_udpbroad(Tcl_Interp *interp, int objc, char * objv[])
+int acq_udpbroad(Tcl_Interp *interp, int objc, Tcl_Obj * objv[])
 {
   struct sockaddr_in serv_addr;
   int retn;
@@ -706,6 +826,7 @@ int acq_udpbroad(Tcl_Interp *interp, int objc, char * objv[])
 
   strval = Tcl_GetStringFromObj(objv[0],&lstr);
   strcpy(obuf,strval);
+  len = lstr;
 
   if (udpsock <= 0) {
     Tcl_SetResult(interp,"Broadcast socket not initialized",TCL_STATIC);
@@ -746,10 +867,11 @@ int acq_udpbroad(Tcl_Interp *interp, int objc, char * objv[])
  *         pointers
  */
 
-int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, char * objv[])
+int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj * objv[])
 {
   int opcode, parm, val, retn;
   float fval;
+  int counting;
   static char rmsg[80];
   //unsigned int to_sec;
   u_int32_t readvalue;
@@ -765,17 +887,21 @@ int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, char * objv
 
   parm = 0;
   val = 0;
-  //to_sec = 30;
 
   strval = Tcl_GetStringFromObj(objv[1],&lstr);
 
-  if        (!strcmp(strval,"update")) {
+  if (!strcmp(strval,"counting")) {
+    rc = acq_counting(&counting);
+    if (rc <= 0) {
+      Tcl_SetResult(interp,"Could not determine counting status",TCL_STATIC);
+      return TCL_ERROR;
+    }
+    Tcl_SetObjResult(interp,Tcl_NewIntObj(counting));
+    return TCL_OK;
+  } else if (!strcmp(strval,"preset")) {
+    return acq_preset(interp, (objc-2), objv+2);
+  } else if (!strcmp(strval,"update")) {
     return acq_update(interp, (objc-2), (objv+2));
-  } else if (!strcmp(strval,"peek")) {
-    return acq_peek();
-  } else if (!strcmp(strval,"dump")) {
-    // Dump lookup tables
-    return acq_dump();
   } else if (!strcmp(strval,"share")) {
     if (objc < 3) {
       Tcl_SetResult(interp,"usage: acquire share <narrayname>",TCL_STATIC);
@@ -801,16 +927,6 @@ int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, char * objv
     return acq_start(interp,(objc-2), (objv+2));
   } else if (!strcmp(strval,"stop")) {
     return acq_stop(interp,(objc-2), (objv+2));
-
-  } else if (!strcmp(strval,"resume")) {
-    opcode = OP_CMD;
-    parm   = CMD_RUN;
-    val    = CMD_RUN_RSM;
-  } else if (!strcmp(strval,"load")) {
-      loadlook();
-      buildtlook();
-      Tcl_SetResult(interp,"Lookups loaded",TCL_STATIC);
-      return TCL_OK;
   } else if (!strcmp(strval,"mode")) {
     if (objc < 3) {
       Tcl_SetResult(interp,"Usage: acquire mode <pst/time/velocity/scan>",TCL_STATIC);
@@ -819,26 +935,31 @@ int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, char * objv
 
     strval = Tcl_GetStringFromObj(objv[2],&lstr);
     if (!strncmp(strval,"pst",lstr)) {
-        timbin=TBINDEFAULT;
-        vme_mode = CMD_MODE_PBN;
-    } else if (!strncmp(strval,"time",lstr)) {
-        vme_mode = CMD_MODE_TBN;
+      timbin=TBINDEFAULT;
+      daq_mode = CMD_MODE_PBN;
+    } else if (!strncmp(strval,"energy",lstr)) {
+      timbin=TBINDEFAULT;
+      daq_mode = CMD_MODE_EBN;
     } else if (!strncmp(strval,"velocity",lstr)) {
-        timbin=TBINDEFAULT;
-        vme_mode = CMD_MODE_VBN;
-        enc_omega();
-        enc_lookup();
+      timbin=TBINDEFAULT;
+      daq_mode = CMD_MODE_EBN;
     } else if (!strncmp(strval,"scan",lstr)) {
       timbin=TBINDEFAULT;
-      enc_omega();
-      enc_lookup();
-      vme_mode = CMD_MODE_SCN;
+      daq_mode = CMD_MODE_SCN;
     } else {
-      Tcl_SetResult(interp,"Valid modes: pst time velocity scan",
+      Tcl_SetResult(interp,"Valid modes: pst velocity scan",
 		    TCL_STATIC);
       return TCL_ERROR;
-    }    
-    loadlook();
+    }
+    // Need to set acquisition mode
+
+    
+    
+    semctl_arg.val = daq_mode;
+    if (semctl(semid,0,SETVAL,semctl_arg) < 0) {
+      Tcl_SetResult(interp,"Cannot initialize acquisition mode semaphore",
+		    TCL_STATIC);
+    }
     return TCL_OK;
   } else if (!strcmp(strval,"write")) {
     return acq_write(interp,(objc-2), (objv+2));
@@ -863,34 +984,27 @@ int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, char * objv
     }
     return TCL_OK;
   } else if (!strcmp(strval,"timer")) {
-    rc=s3100_sharc_read(sharc_fd, (irqctr-INTRAM), &readvalue, 1) ;
-      if (rc==4) {
-        fval=timbin*1e-6*readvalue;
-	Tcl_SetObjResult(interp,Tcl_NewDoubleObj(fval));
-        return TCL_OK;
-      } else return TCL_ERROR;
-  } else if (!strcmp(strval,"ticks")) {
-    rc=s3100_sharc_read(sharc_fd, (irqctr-INTRAM), &readvalue, 1) ;
-      if (rc>0) {
-	Tcl_SetObjResult(interp,Tcl_NewIntObj(readvalue));
-        return TCL_OK;
-      } else return TCL_ERROR;
-  } else if (!strcmp(strval,"pointers")) {
+    retn = acq_frames(&val);
+    if (retn > 0) {
+      fval = val * timbin * 1e-6;
+      live_time = fval; //
 
-    readvalue = 0;
-    rc = s3100_sharc_read(sharc_fd, (ptroff1-INTRAM), &readvalue, 1);
-    printf("ptr1 = %d\n",readvalue);
-    rc = s3100_sharc_read(sharc_fd, (ptroff2-INTRAM), &readvalue, 1);
-    printf("ptr2 = %d\n",readvalue);
-    rc = s3100_sharc_read(sharc_fd, (ptroff3-INTRAM), &readvalue, 1);
-    printf("ptr3 = %d\n",readvalue);
-    rc = s3100_sharc_read(sharc_fd, (ptroff4-INTRAM), &readvalue, 1);
-    printf("ptr4 = %d\n",readvalue);
-    return TCL_OK;
+      Tcl_SetObjResult(interp,Tcl_NewDoubleObj(fval));
+      return TCL_OK;
+    }
+    Tcl_SetResult(interp,"Trouble read number of frames for timer",TCL_STATIC);
+    return TCL_ERROR;
+  } else if (!strcmp(strval,"frames")) {
+    retn = acq_frames(&val);
+    if (retn>0) {
+      Tcl_SetObjResult(interp,Tcl_NewIntObj(val));
+      return TCL_OK;
+    }
+    
+    Tcl_SetResult(interp,"Trouble reading number of frames",TCL_STATIC);
+    return TCL_ERROR;    
   } else if (!strcmp(strval,"scalers")) {
     return acq_scalers(interp,(objc-2), (objv+2));
-  } else if (!strcmp(strval,"latch")) {
-    return acq_latch(interp, (objc-2), (objv+2));
   } else if (!strcmp(strval,"timebin")) {
     if (objc < 3) {
       Tcl_SetResult(interp,"Usage: acquire timebin <binwidth (usec)>",
@@ -899,7 +1013,7 @@ int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, char * objv
     } 
     if (Tcl_GetIntFromObj(interp,objv[2],&timbin) != TCL_OK) return TCL_ERROR;
     else {
-      buildtlook();
+      // NCM Figure out out to set parameter for this
     }
   } else if (!strcmp(strval,"broadcast")) {
       return acq_udpbroad(interp,(objc-2),(objv+2));
@@ -945,21 +1059,6 @@ int Acquire_Init(Tcl_Interp *interp) {
   semkey = ftok("/tmp",'b');
   live_time = 0.0;
 
-  if ((sdram_fd = open(sdram_dev,O_RDWR, 0)) <= 0) {
-    Tcl_SetResult(interp, "error opening sdram link", TCL_STATIC);
-    return TCL_ERROR;
-  }
-
-  if ((sharc_fd = open(sharc_dev,O_RDWR, 0)) <= 0) {
-    Tcl_SetResult(interp, "error opening sharc link", TCL_STATIC);
-    return TCL_ERROR;
-  }
-
-  if ((vme_fd = open(vme_dev,O_RDWR, 0)) <= 0) {
-    Tcl_SetResult(interp, "error opening VME bridge", TCL_STATIC);
-    return TCL_ERROR;
-  }
-
   /* Open the shared memory segment, creating it if necessary */
   if ((shmid = shmget(shkey, NDCHAN * NTCHAN * sizeof(float), 
 		      IPC_CREAT|0666)) < 0) {
@@ -982,7 +1081,7 @@ int Acquire_Init(Tcl_Interp *interp) {
     return TCL_ERROR;
   }
 
-  semctl_arg.val = vme_mode;
+  semctl_arg.val = daq_mode;
   if (semctl(semid,0,SETVAL,semctl_arg) < 0) {
     Tcl_SetResult(interp,"Cannot initialize acquisition mode semaphore",
 		  TCL_STATIC);
@@ -999,9 +1098,6 @@ int Acquire_Init(Tcl_Interp *interp) {
   memset(Increment,0,sizeof(Increment));
   Calc_Vectors();
 
-  printf("sdram_dev = \"%s\" sdram_fd = %d\n",sdram_dev,sdram_fd);
-  printf("sharc_dev = \"%s\" sharc_fd = %d\n",sharc_dev,sharc_fd);
-  printf("vme_dev   = \"%s\" vme_fd   = %d\n",vme_dev,vme_fd);
   retn = acq_udpsock();
 
   /* Turn on debugging from Tcl */

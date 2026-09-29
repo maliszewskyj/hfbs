@@ -1,4 +1,4 @@
-#!/usr/bin/tclsh
+#!/usr/bin/wish
 # $Id: main.tcl,v 1.8 2008/05/08 13:10:43 nickm Exp $
 
 set shell     expect
@@ -16,6 +16,14 @@ foreach lib $libs {
         exit
     }
 }
+
+if [regexp {wish|expectk} [info nameofexecutable] match] {
+    button .exit -text "Stop Server" -command exit
+    pack .exit
+    wm title . "HFBS Core Program"
+    #wm withdraw .
+}
+
 
 #
 # Load scripts containing variable declarations and procedures
@@ -100,9 +108,7 @@ catch {TempRestore}
 # Spawn an event loop if we don't already have one
 if {![regexp {wish|expectk} [info nameofexecutable] match]} {
     vwait forever
-} else {
-    catch {wm withdraw .}
-}
+} 
 
 
 

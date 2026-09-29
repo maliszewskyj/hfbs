@@ -34,12 +34,12 @@ proc FormatHdwLogLine { } {
     append outstring [format "%13.3f " $abstime]
     append outstring [format " %7.3f " $hdw(vac,current)]
     append outstring " [FormatOnOff $hdw(vac_hv_en,current)]  "
-    append outstring [format " %6.1f   " $hdw(doppler_hrate,current)]
+    append outstring [format " %6.1f   " $hdw(doppler_setp,current)]
     append outstring "[FormatOnOff $hdw(doppler_enable,current)]  "
     append outstring "[FormatOnOff $hdw(doppler_oilpressure,current)]  "
     append outstring "[FormatOnOff $hdw(doppler_oiltemp,current)]  "
     append outstring "[FormatOnOff $hdw(doppler_vibration,current)]  "
-    append outstring [format " %6.1f" $hdw(pst_hrate,current)]
+    append outstring [format " %6.1f" $hdw(pst_setp,current)]
     append outstring " "
     append outstring "[FormatOnOff $hdw(pst_enable,current)]  "
     append outstring "[FormatOnOff $hdw(pst_drivefault,current)]  "
