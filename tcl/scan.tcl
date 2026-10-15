@@ -82,7 +82,19 @@ proc ScanBuffer { bufno } {
 	}
     }
     
-
+    # Check for running hfbsdaq server
+    if {![HFBSCheck]} {
+	putmsg [expr $logs(corelog) + $logs(errlog)] \
+	    "hfbsdaq does not appear to be running. Restarting"
+	HFBSRestart
+	sleep 5
+	if {![HFBSCheck]} {
+	    putmsg [expr $logs(corelog) + $logs(errlog)] \
+		"hfbsdaq could not be restarted."
+	    return -code error "ERR:\nCould not start hfbsdaq"
+	}
+    }
+    
     # Set run mode to "scan" - scan mode is really just standard mode
     set errcount 0
     while [catch {acquire mode scan} result] {
@@ -271,6 +283,19 @@ proc ScanStartPoint { } {
     # Start run now
     set errcount 0
 
+    # Check for running hfbsdaq server
+    if {![HFBSCheck]} {
+	putmsg [expr $logs(corelog) + $logs(errlog)] \
+	    "hfbsdaq does not appear to be running. Restarting"
+	HFBSRestart
+	sleep 5
+	if {![HFBSCheck]} {
+	    putmsg [expr $logs(corelog) + $logs(errlog)] \
+		"hfbsdaq could not be restarted."
+	    return -code error "ERR:\nCould not start hfbsdaq"
+	}
+    }
+    
     # Clear remote histogram
     catch {acquire clear}
 

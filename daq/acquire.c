@@ -952,7 +952,7 @@ int Tcl_Acquire(ClientData clientData, Tcl_Interp *interp, int objc, Tcl_Obj * o
       return TCL_ERROR;
     }
     // Need to set acquisition mode
-
+    if (acq_setmode(interp,daq_mode)==TCL_ERROR) return TCL_ERROR;
     
     
     semctl_arg.val = daq_mode;

@@ -62,6 +62,23 @@ proc run { req_action args } {
     }
 }
 
+# Check on running status of HFBS data acquisition program
+proc HFBSCheck { } {
+    set output [exec ssh ncnr\@hfbsdaq.ncnr.nist.gov bin/hfbstool]
+    if {[regexp {running} $output]} {
+	return 1
+    } else {
+	return 0
+    }
+    return 0 ;# Default is _not_ running
+}
+
+proc HFBSRestart { } {
+    # Note that unless we explicitly redirect stdout, stderr, and stdin this command can hang
+    set output [exec ssh ncnr\@hfbsdaq.ncnr.nist.gov "nohup bin/hfbstool -s > hfbsdaq.out 2>&1 < /dev/null"]
+    return 1
+}
+
 proc RunStart { ncycles cycletime {mode velocity} {comments ""}} {
     global action run time logs
 
@@ -86,6 +103,20 @@ proc RunStart { ncycles cycletime {mode velocity} {comments ""}} {
 		    "ERR:\nAvailable run modes: pst time velocity"
 	}
     }
+    
+    # Check for running hfbsdaq server
+    if {![HFBSCheck]} {
+	putmsg [expr $logs(corelog) + $logs(errlog)] \
+	    "hfbsdaq does not appear to be running. Restarting"
+	HFBSRestart
+	sleep 5
+	if {![HFBSCheck]} {
+	    putmsg [expr $logs(corelog) + $logs(errlog)] \
+		"hfbsdaq could not be restarted."
+	    return -code error "ERR:\nCould not start hfbsdaq"
+	}
+    }
+
 
     # Set frequency of heartbeat for time binning mode
     #catch {acquire timebin $run(timebin)} result
@@ -206,6 +237,19 @@ proc RunBuffer { bufno } {
 
     # Set frequency of heartbeat for time binning mode
     #catch {acquire timebin $run(timebin)} result
+    # Check for running hfbsdaq server
+    if {![HFBSCheck]} {
+	putmsg [expr $logs(corelog) + $logs(errlog)] \
+	    "hfbsdaq does not appear to be running. Restarting"
+	HFBSRestart
+	sleep 5
+	if {![HFBSCheck]} {
+	    putmsg [expr $logs(corelog) + $logs(errlog)] \
+		"hfbsdaq could not be restarted."
+	    return -code error "ERR:\nCould not start hfbsdaq"
+	}
+    }
+
 
     # Set run mode
     set errcount 0
